@@ -18,6 +18,8 @@ or commit it.
 | PATCH | `/cards/:id` | Fix `topic`, `q`, `a` or `source` |
 | DELETE | `/cards/:id` | Remove a card |
 | POST | `/topics/rename` | Move a topic and its subtopics: `{"from","to"}` |
+| GET | `/links` | Prerequisite links between topics |
+| POST / DELETE | `/links` | Add or remove: `{"links":[{"topic","requires"}]}` |
 
 `POST /cards` returns `{added, skipped}`. A card is skipped when its question
 already exists in that topic (ignoring case and spacing) or a field is missing.
@@ -55,6 +57,15 @@ card per line as `question ; answer ; topic` (or tab-separated).
 - The owner studies by topic, so a topic should be something they would want
   to drill on its own.
 
+## Prerequisites (optional)
+
+Topics can name other topics they build on, e.g. `Computing › Rust › Lifetimes`
+requires `Computing › Rust › Ownership`. These links are only drawn on the
+app's knowledge map; they never change scheduling. When you add cards for a
+new topic that clearly depends on an existing one, add the link too. Keep it
+to direct, real dependencies. Don't link a topic to its own parent, since the
+tree already shows that.
+
 ## Writing good cards
 
 Follow Piotr Woźniak's *Twenty Rules of Formulating Knowledge* (and Andy
@@ -88,6 +99,7 @@ it plain otherwise.
 ## Code layout
 
 - `public/`: the app (static, mobile-first). `fsrs.js` is the scheduler,
-  `app.js` the UI, `stats.js` the statistics page.
+  `app.js` the UI, `stats.js` the statistics page,
+  `map.js` the knowledge map, `paste.js` the paste-import parser.
 - `src/worker.js`: the API and asset serving (a Cloudflare Worker).
 - `migrations/`: the D1 schema. Deployed with `npx wrangler deploy`.

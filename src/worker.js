@@ -6,13 +6,14 @@ const sha = async s => [...new Uint8Array(await crypto.subtle.digest('SHA-256', 
 const STATE = ['s', 'd', 'last', 'due', 'reps', 'lapses'];
 const norm = s => s.trim().toLowerCase().replace(/\s+/g, ' ');
 const id = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+const normTopic = t => (t || '').trim().split(/\s*(?:›|>|::|\/)\s*/).filter(Boolean).join(' › ');
 const getMeta = async (db, k) => (await db.prepare('SELECT v FROM meta WHERE k = ?').bind(k).first())?.v;
 
 export default {
   async fetch(req, env) {
     const url = new URL(req.url), path = url.pathname.replace(/\/+$/, ''), db = env.DB, M = req.method;
     if (!path.startsWith('/api')) return env.ASSETS.fetch(req);
-    const body = M === 'GET' || M === 'DELETE' ? null : await req.json().catch(() => null);
+    const body = M === 'GET' ? null : await req.json().catch(() => null);
     const keyHash = await getMeta(db, 'key_hash');
 
     if (path === '/api/status') return json({ claimed: !!keyHash });
@@ -30,7 +31,8 @@ export default {
       const since = +url.searchParams.get('since') || 0;
       const { results } = await db.prepare('SELECT * FROM cards WHERE updated > ? ORDER BY updated').bind(since).all();
       const stats = JSON.parse(await getMeta(db, 'stats') || '{}');
-      return json({ cards: results, stats, now: Date.now() });
+      const links = await db.prepare('SELECT topic, requires FROM links ORDER BY topic').all();
+      return json({ cards: results, stats, links: links.results, now: Date.now() });
     }
 
     if (path === '/api/stats' && M === 'PUT') {
@@ -62,11 +64,23 @@ export default {
 
     // Moves a topic and its subtopics: "Spanish" → "Languages › Spanish".
     if (path === '/api/topics/rename' && M === 'POST') {
-      const from = body?.from?.trim(), to = body?.to?.trim().split(/\s*(?:›|>|::|\/)\s*/).filter(Boolean).join(' › ');
+      const from = body?.from?.trim(), to = normTopic(body?.to);
       if (!from || !to) return json({ error: 'send {from, to}' }, 400);
       const r = await db.prepare("UPDATE cards SET topic = ? || substr(topic, ?), updated = ? WHERE deleted = 0 AND (topic = ? OR topic LIKE ?)")
         .bind(to, from.length + 1, Date.now(), from, from + ' › %').run();
+      // Prerequisite links follow the topics they name.
+      for (const col of ['topic', 'requires']) await db.prepare(`UPDATE OR REPLACE links SET ${col} = ? || substr(${col}, ?) WHERE ${col} = ? OR ${col} LIKE ?`).bind(to, from.length + 1, from, from + ' › %').run();
       return json({ ok: true, moved: r.meta.changes });
+    }
+
+    // Optional domain model: "topic requires topic". Only drawn on the map.
+    if (path === '/api/links' && M === 'GET') return json((await db.prepare('SELECT topic, requires FROM links ORDER BY topic').all()).results);
+    if (path === '/api/links' && (M === 'POST' || M === 'DELETE')) {
+      const list = (Array.isArray(body) ? body : body?.links || [body]).map(l => ({ topic: normTopic(l?.topic), requires: normTopic(l?.requires) }));
+      if (list.some(l => !l.topic || !l.requires || l.topic === l.requires)) return json({ error: 'send {links: [{topic, requires}]} with two different topics' }, 400);
+      const sql = M === 'POST' ? 'INSERT OR IGNORE INTO links (topic, requires) VALUES (?, ?)' : 'DELETE FROM links WHERE topic = ? AND requires = ?';
+      await db.batch(list.map(l => db.prepare(sql).bind(l.topic, l.requires)));
+      return json({ ok: true, count: list.length });
     }
 
     if (path === '/api/cards' && M === 'GET') {

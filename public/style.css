@@ -171,3 +171,26 @@ details table { max-height: 240px }
 .pv b { font-weight: 600; font-variant-numeric: tabular-nums }
 .pv .muted { color: var(--muted) } .pv .warn { color: #e4a08d; font-size: 13px }
 .sheet form { max-height: 92dvh; overflow-y: auto }
+
+/* Knowledge map */
+.links #map { grid-column: span 2 }
+.mapwrap { position: relative; padding-right: 56px }
+.arcs { position: absolute; top: 0; right: 0; width: 56px; overflow: visible; pointer-events: none }
+.maplist { display: grid; gap: 4px }
+.mrow { display: grid; grid-template-columns: 1fr 64px 40px; align-items: center; gap: 10px; text-align: left; padding: 10px 12px 10px calc(12px + var(--d) * 18px); background: var(--surface); border-radius: 14px; position: relative }
+.mrow::before { content: ''; position: absolute; left: calc(4px + var(--d) * 18px); top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: var(--line) }
+.mrow[style*="--d:0"]::before { display: none }
+.mrow.sel { box-shadow: inset 0 0 0 1px var(--brass) }
+.mrow:active { background: var(--raised) }
+.mrow .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px }
+.mrow[style*="--d:0"] .nm { font-weight: 600 }
+.mrow .nm small { display: block; color: var(--muted); font-size: 12px }
+.meter { height: 6px; border-radius: 3px; background: #1c4a3a; overflow: hidden }
+.meter i { display: block; height: 100%; border-radius: 3px }
+.mrow .pc { font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink) }
+.deps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px }
+.chip.dep { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); white-space: normal; text-align: left }
+.chip.dep i { width: 9px; height: 9px; border-radius: 50%; flex: none }
+.chip.dep small { color: var(--muted) }
+.chip.dep button { color: var(--muted); font-size: 16px; line-height: 1; padding: 0 0 0 4px }
+select { width: 100%; font: inherit; font-size: 15px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 12px }

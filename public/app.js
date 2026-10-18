@@ -1,5 +1,6 @@
 import { review, preview } from './fsrs.js';
 import { stats } from './stats.js';
+import { map } from './map.js';
 import { parsePaste, normTopic, normQ } from './paste.js';
 
 const KEY = 'bloom-v2', ROUND = 10, NEW_PER_DAY = 15, GILD_CHANCE = 1 / 12;
@@ -8,7 +9,7 @@ const app = document.getElementById('app'), sheet = document.getElementById('she
 
 let st;
 try { st = JSON.parse(localStorage.getItem(KEY)) } catch {}
-st = { cards: {}, reviews: {}, outbox: [], pending: [], ops: [], since: 0, xp: 0, streak: 0, lastDay: null, newDay: null, newCount: 0, ...st };
+st = { cards: {}, reviews: {}, outbox: [], pending: [], ops: [], links: [], since: 0, xp: 0, streak: 0, lastDay: null, newDay: null, newCount: 0, ...st };
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)) } catch {} };
 
 /* ---------- Server ---------- */
@@ -54,6 +55,7 @@ async function syncOnce() {
         if (o.kind === 'patch') await api('/cards/' + o.id, { method: 'PATCH', body: o.body });
         else if (o.kind === 'delete') await api('/cards/' + o.id, { method: 'DELETE' });
         else if (o.kind === 'rename') await api('/topics/rename', { method: 'POST', body: { from: o.from, to: o.to } });
+        else if (o.kind === 'link' || o.kind === 'unlink') await api('/links', { method: o.kind === 'link' ? 'POST' : 'DELETE', body: { topic: o.topic, requires: o.requires } });
       } catch (e) { if (e.status !== 404) throw e }
       st.ops.shift(); save();
     }
@@ -65,6 +67,8 @@ async function syncOnce() {
       // Local state wins while a review of this card is still waiting to upload.
       if (c.reps && !st.outbox.some(o => o.id === c.id)) st.reviews[c.id] = { s: c.s, d: c.d, last: c.last, due: c.due, reps: c.reps, lapses: c.lapses };
     }
+    // Ops are drained above, so the server's links are current.
+    st.links = r.links || [];
     if ((r.stats.xp || 0) > st.xp) Object.assign(st, r.stats);
     st.since = r.cards.length ? Math.max(...r.cards.map(c => c.updated)) : st.since;
     await api('/stats', { method: 'PUT', body: statsOf() });
@@ -127,7 +131,7 @@ addEventListener('popstate', e => {
   sheet.hidden = true;
   // A closed sheet or a finished round can't be resumed by going forward: step back off it.
   if (s.sheet || s.v === 'study' || s.v === 'summary') return history.back();
-  if (s.v === 'library') library(); else if (s.v === 'stats') showStats(); else home();
+  if (s.v === 'library') library(); else if (s.v === 'stats') showStats(); else if (s.v === 'map') showMap(); else home();
 });
 function home() {
   round = null; view = 'home';
@@ -145,10 +149,11 @@ function home() {
     ${all.total ? `<button class="hero" data-t=""><div class="label" style="margin:0 0 8px">Everything</div><h2 class="serif">${all.total} ready</h2><small class="label" style="text-transform:none;letter-spacing:0;font-size:14px">A round is ${Math.min(ROUND, all.total)} card${Math.min(ROUND, all.total) > 1 ? 's' : ''}. Stop whenever.</small><div><span class="go">Play a round</span></div></button>`
       : `<div class="hero"><h2 class="serif">All caught up</h2><small style="color:var(--muted)">${deck.length ? 'Nothing is ready. Add something new, or come back later.' : 'No cards yet — tap + to add your first.'}</small></div>`}
     ${rows ? `<div class="label">Focus on a topic</div>${rows}` : ''}
-    ${deck.length ? `<div class="links"><button class="topic" id="lib">Manage cards</button><button class="topic" id="stats">Statistics</button></div>` : ''}
+    ${deck.length ? `<div class="links"><button class="topic" id="lib">Manage cards</button><button class="topic" id="stats">Statistics</button><button class="topic" id="map">Knowledge map</button></div>` : ''}
     <button class="fab" aria-label="Add a card">+</button>`;
   document.getElementById('lib')?.addEventListener('click', () => { nav({ v: 'library' }); library() });
   document.getElementById('stats')?.addEventListener('click', () => { nav({ v: 'stats' }); showStats() });
+  document.getElementById('map')?.addEventListener('click', () => { nav({ v: 'map' }); showMap() });
   requestAnimationFrame(() => requestAnimationFrame(() => { const ring = document.getElementById('ring'); if (ring) ring.style.strokeDashoffset = C * (1 - p) }));
   countUp(document.getElementById('lvxp'), from - levelStart(L), st.xp - levelStart(L), 800);
   app.querySelectorAll('[data-t]').forEach(b => b.onclick = () => start(b.dataset.t));
@@ -287,7 +292,17 @@ function library() {
   app.querySelector('.fab').onclick = () => openEditor();
   document.getElementById('import').onclick = openImport;
 }
-const refresh = () => view === 'library' ? library() : view === 'stats' ? showStats() : home();
+const refresh = () => view === 'library' ? library() : view === 'stats' ? showStats() : view === 'map' ? showMap() : home();
+function showMap() {
+  round = null; view = 'map';
+  map({
+    app, sheet, goBack, openSheet, inTopic, topics,
+    cards: () => deck, states: () => st.reviews, links: () => st.links,
+    link: (topic, requires) => { st.links.push({ topic, requires }); st.ops.push({ kind: 'link', topic, requires }); save(); sync() },
+    unlink: (topic, requires) => { st.links = st.links.filter(l => !(l.topic === topic && l.requires === requires)); st.ops.push({ kind: 'unlink', topic, requires }); save(); sync() },
+    study: topic => { sheet.hidden = true; start(topic) },
+  });
+}
 function showStats() {
   round = null; view = 'stats';
   stats({ app, api, goBack, openEditor, inTopic, topics, view: () => view, cards: () => deck, states: () => st.reviews, outbox: () => st.outbox, cardById: id => st.cards[id] });
@@ -309,6 +324,8 @@ function renameTopic(from) {
       for (const c of deck) if (inTopic(c, from)) c.topic = to + c.topic.slice(from.length);
       st.pending.forEach(c => { if (inTopic(c, from)) c.topic = to + c.topic.slice(from.length) });
       st.ops.push({ kind: 'rename', from, to });
+      const move = t => inTopic({ topic: t }, from) ? to + t.slice(from.length) : t;
+      st.links = st.links.map(l => ({ topic: move(l.topic), requires: move(l.requires) }));
       if (lib.topic && inTopic({ topic: lib.topic }, from)) lib.topic = to + lib.topic.slice(from.length);
       save(); sync(); toast(`Renamed to ${to}`);
     }
@@ -478,4 +495,7 @@ history.replaceState({ v: 'home', depth: 0 }, '', location.pathname);
 if (!apiKey) gate();
 else { home(); sync().then(ok => { if (ok && !round && sheet.hidden) refresh() }) }
 addEventListener('online', () => apiKey && sync());
+// The map and stats lay out to the screen width, so redraw them when it changes.
+let resizeTimer;
+addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if ((view === 'map' || view === 'stats') && sheet.hidden) refresh() }, 200) });
 addEventListener('visibilitychange', () => { if (!document.hidden && apiKey) sync().then(() => { if (!round && sheet.hidden) refresh() }) });
