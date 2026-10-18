@@ -234,7 +234,7 @@ function summary() {
 
 /* ---------- Add ---------- */
 /* ---------- Library ---------- */
-let lib = { q: '', topic: '' };
+let lib = { q: '', topic: '' }, searchTimer;
 const status = c => { const s = st.reviews[c.id]; return !s ? 'new' : s.due <= Date.now() ? 'ready' : 'in ' + fmt(s.due - Date.now()) };
 function library() {
   round = null; view = 'library';
@@ -254,7 +254,10 @@ function library() {
     <button class="fab" aria-label="Add a card">+</button>`;
   app.querySelector('.x').onclick = () => { view = 'home'; home() };
   const s = document.getElementById('search');
-  s.oninput = () => { lib.q = s.value; const pos = s.selectionStart; library(); const n = document.getElementById('search'); n.focus(); n.setSelectionRange(pos, pos) };
+  s.oninput = () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { lib.q = s.value; const pos = s.selectionStart; library(); const n = document.getElementById('search'); n.focus(); n.setSelectionRange(pos, pos) }, 150);
+  };
   app.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { lib.topic = b.dataset.f; library() });
   app.querySelectorAll('[data-id]').forEach(b => b.onclick = () => openEditor(st.cards[b.dataset.id]));
   app.querySelectorAll('[data-rename]').forEach(b => b.onclick = () => renameTopic(b.dataset.rename));
