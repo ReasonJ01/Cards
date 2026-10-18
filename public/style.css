@@ -211,3 +211,22 @@ select { width: 100%; font: inherit; font-size: 15px; color: var(--ink); backgro
 .row small { overflow-wrap: anywhere }
 .row code { font-size: .88em }
 .row > span { white-space: nowrap }
+
+/* Knowledge map: prerequisite graph */
+.gwrap { padding: 14px 0 6px } .gwrap h3 { padding: 0 16px; font-size: 13px; color: var(--muted); font-weight: 500 }
+.gscroll { overflow-x: auto; scrollbar-width: none; padding: 6px 0 }
+.gcanvas { position: relative; margin: 0 auto }
+.gedges { position: absolute; inset: 0; overflow: visible }
+.gedges path { fill: none; stroke: #a9b8ad; stroke-opacity: .55; stroke-width: 1.5 }
+.gedges path.on { stroke: var(--brass); stroke-opacity: 1; stroke-width: 2 }
+.gedges path.dim { stroke-opacity: .15 }
+.gedges marker path { stroke: none; fill: #a9b8ad } .gedges marker path.on { fill: var(--brass) }
+.gn { position: absolute; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 7px 9px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; text-align: left; transition: opacity .2s }
+.gn small { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.gn > * { flex: none }
+.gn .gname { font-size: 12.5px; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden }
+.gn .gfoot { display: flex; align-items: center; gap: 6px }
+.gn .gfoot .bar2 { flex: 1; width: auto }
+.gn .gfoot b { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums }
+.gn.sel { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass) }
+.gn.dim { opacity: .35 }
