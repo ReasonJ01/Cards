@@ -8,4 +8,6 @@ Anki-style spaced repetition, scheduled by **FSRS**, designed to spark joy.
 - Bulk import `front;back` / tab-separated lines (Anki text export works)
 - JSON backup/restore; everything stays in your browser
 
-Run: `python3 -m http.server` then open http://localhost:8000 (ES modules need a server).
+Run locally: `python3 -m http.server -d public`, then open http://localhost:8000 (ES modules need a server).
+
+Deploy: `npx wrangler deploy` (static assets on Cloudflare Workers).
