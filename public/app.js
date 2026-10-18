@@ -109,6 +109,25 @@ function float(t) { const e = Object.assign(document.createElement('div'), { cla
 
 /* ---------- Home ---------- */
 let view = 'home';
+
+// Navigation: every screen and open sheet is a history entry, so browser
+// back/forward (and Chrome's swipe gestures) move through the app.
+function nav(state, replace) {
+  const depth = (history.state?.depth ?? 0) + (replace ? 0 : 1);
+  history[replace ? 'replaceState' : 'pushState']({ ...state, depth }, '', '#' + (state.v === 'home' ? '' : state.v));
+}
+function goBack() {
+  if (history.state?.depth) return history.back();
+  sheet.hidden = true; nav({ v: 'home' }, true); home();
+}
+const openSheet = () => { if (sheet.hidden) nav({ v: view === 'library' ? 'library' : 'home', sheet: true }); sheet.hidden = false };
+addEventListener('popstate', e => {
+  const s = e.state || { v: 'home' };
+  sheet.hidden = true;
+  // A closed sheet or a finished round can't be resumed by going forward: step back off it.
+  if (s.sheet || s.v === 'study' || s.v === 'summary') return history.back();
+  if (s.v === 'library') library(); else home();
+});
 function home() {
   round = null; view = 'home';
   const L = levelOf(st.xp), span = levelStart(L + 1) - levelStart(L), p = (st.xp - levelStart(L)) / span;
@@ -127,7 +146,7 @@ function home() {
     ${rows ? `<div class="label">Focus on a topic</div>${rows}` : ''}
     ${deck.length ? `<button class="topic" id="lib" style="margin-top:22px;justify-content:center;color:var(--muted)">Manage cards</button>` : ''}
     <button class="fab" aria-label="Add a card">+</button>`;
-  document.getElementById('lib')?.addEventListener('click', () => library());
+  document.getElementById('lib')?.addEventListener('click', () => { nav({ v: 'library' }); library() });
   requestAnimationFrame(() => requestAnimationFrame(() => { const ring = document.getElementById('ring'); if (ring) ring.style.strokeDashoffset = C * (1 - p) }));
   countUp(document.getElementById('lvxp'), from - levelStart(L), st.xp - levelStart(L), 800);
   app.querySelectorAll('[data-t]').forEach(b => b.onclick = () => start(b.dataset.t));
@@ -136,9 +155,10 @@ function home() {
 
 /* ---------- Round ---------- */
 let round = null;
-function start(topic) {
+function start(topic, replace) {
   const r = ready(topic);
   if (!r.total) return toast('Nothing ready here');
+  nav({ v: 'study' }, replace);
   // Interleave new cards among reviews so a round never feels like a wall of unknowns.
   const q = [...r.due.slice(0, ROUND)], fresh = r.fresh.slice(0, ROUND - Math.min(q.length, ROUND - Math.min(3, r.fresh.length)));
   q.length = Math.min(q.length, ROUND - fresh.length);
@@ -167,7 +187,7 @@ function draw() {
   requestAnimationFrame(() => requestAnimationFrame(() => bar.style.width = pct + '%'));
   countUp(app.querySelector('.xp'), round.shown, round.xp, 450, n => n + ' xp');
   round.pct = pct; round.shown = round.xp;
-  app.querySelector('.x').onclick = () => round.done ? summary() : home();
+  app.querySelector('.x').onclick = () => round.done ? summary() : goBack();
   app.querySelector('.card').onclick = () => { if (!round.flipped) { round.flipped = true; draw() } };
   app.querySelectorAll('[data-g]').forEach(b => b.onclick = () => grade(+b.dataset.g));
 }
@@ -207,6 +227,7 @@ function draw_bonus() {
   return [10 + (Math.random() * 15 | 0), 'Bonus'];
 }
 function summary() {
+  nav({ v: 'summary' }, true);
   const R = round, acc = R.done ? Math.round(100 * R.right / R.done) : 0;
   app.innerHTML = `<div class="summary">
     <div class="label" style="margin:0">Round complete</div>
@@ -228,8 +249,8 @@ function summary() {
     if (L > R.startLevel) later(() => document.getElementById('lvl').innerHTML = `<p class="levelup">Level ${L} reached</p>`, 800);
     if (ready(R.topic).total) document.getElementById('more').hidden = false;
   };
-  document.getElementById('more').onclick = () => start(R.topic);
-  document.getElementById('done').onclick = home;
+  document.getElementById('more').onclick = () => start(R.topic, true);
+  document.getElementById('done').onclick = goBack;
 }
 
 /* ---------- Add ---------- */
@@ -252,7 +273,7 @@ function library() {
     <div class="chips" style="margin:12px 0 4px"><button class="chip ${lib.topic ? '' : 'on'}" data-f="">All</button>${topics().map(t => `<button class="chip ${t === lib.topic ? 'on' : ''}" data-f="${esc(t)}">${esc(t)}</button>`).join('')}</div>
     <div class="list">${html || '<p class="empty">No cards match.</p>'}</div>
     <button class="fab" aria-label="Add a card">+</button>`;
-  app.querySelector('.x').onclick = () => { view = 'home'; home() };
+  app.querySelector('.x').onclick = goBack;
   const s = document.getElementById('search');
   s.oninput = () => {
     clearTimeout(searchTimer);
@@ -263,7 +284,7 @@ function library() {
   app.querySelectorAll('[data-rename]').forEach(b => b.onclick = () => renameTopic(b.dataset.rename));
   app.querySelector('.fab').onclick = () => openEditor();
 }
-const back = () => view === 'library' ? library() : home();
+const refresh = () => view === 'library' ? library() : home();
 
 function renameTopic(from) {
   sheet.innerHTML = `<form>
@@ -272,8 +293,8 @@ function renameTopic(from) {
     <input name="to" value="${esc(from)}" required>
     <button class="btn">Rename</button></form>`;
   const f = sheet.querySelector('form');
-  sheet.hidden = false; f.to.focus(); f.to.select();
-  sheet.onclick = e => { if (e.target === sheet || e.target.dataset.close != null) { sheet.hidden = true } };
+  openSheet(); f.to.focus(); f.to.select();
+  sheet.onclick = e => { if (e.target === sheet || e.target.dataset.close != null) goBack() };
   f.onsubmit = e => {
     e.preventDefault();
     const to = normTopic(f.to.value);
@@ -284,7 +305,7 @@ function renameTopic(from) {
       if (lib.topic && inTopic({ topic: lib.topic }, from)) lib.topic = to + lib.topic.slice(from.length);
       save(); sync(); toast(`Renamed to ${to}`);
     }
-    sheet.hidden = true; library();
+    goBack();
   };
 }
 
@@ -321,7 +342,7 @@ function openEditor(card) {
     const del = sheet.querySelector('[data-del]');
     if (del) del.onclick = () => {
       if (!del.dataset.armed) { del.dataset.armed = 1; del.textContent = 'Tap again to delete'; del.style.color = '#e4a08d'; return }
-      deleteCard(card); sheet.hidden = true; toast('Card deleted'); back();
+      deleteCard(card); toast('Card deleted'); goBack();
     };
     sheet.querySelector('[data-new]').onclick = () => { f.topic.hidden = false; f.topic.value = ''; f.topic.focus() };
     f.onsubmit = async e => {
@@ -329,18 +350,18 @@ function openEditor(card) {
       topic = normTopic(f.topic.value.trim() || topic || 'Inbox');
       if (card) {
         editCard(card, { topic, q: f.q.value.trim(), a: f.a.value.trim() });
-        sheet.hidden = true; toast('Saved'); return back();
+        toast('Saved'); return goBack();
       }
       const added = { id: crypto.randomUUID().replace(/-/g, '').slice(0, 16), topic, q: f.q.value.trim(), a: f.a.value.trim() };
       st.cards[added.id] = added; st.pending.push({ ...added, source: 'app' });
       save(); merge(); localStorage.setItem('bloom-topic', topic);
-      back(); toast(`Added to ${topic}`); paint(); sync();
+      refresh(); toast(`Added to ${topic}`); paint(); sync();
     };
     if (!card) f.q.focus();
   };
   const f2 = () => sheet.querySelector('form');
-  sheet.hidden = false; paint();
-  sheet.onclick = e => { if (e.target === sheet || e.target.dataset.close != null) { sheet.hidden = true; back() } };
+  openSheet(); paint();
+  sheet.onclick = e => { if (e.target === sheet || e.target.dataset.close != null) goBack() };
 }
 
 /* ---------- Boot ---------- */
@@ -365,7 +386,8 @@ document.addEventListener('keydown', e => {
   else if (round.flipped && '1234'.includes(e.key)) grade(+e.key);
 });
 merge();
+history.replaceState({ v: 'home', depth: 0 }, '', location.pathname);
 if (!apiKey) gate();
-else { home(); sync().then(ok => { if (ok && !round && sheet.hidden) back() }) }
+else { home(); sync().then(ok => { if (ok && !round && sheet.hidden) refresh() }) }
 addEventListener('online', () => apiKey && sync());
-addEventListener('visibilitychange', () => { if (!document.hidden && apiKey) sync().then(() => { if (!round && sheet.hidden) back() }) });
+addEventListener('visibilitychange', () => { if (!document.hidden && apiKey) sync().then(() => { if (!round && sheet.hidden) refresh() }) });
