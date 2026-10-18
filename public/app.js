@@ -397,7 +397,7 @@ Rules (from Woźniak's "Twenty Rules of Formulating Knowledge"):
 Topics are paths, most general first, joined with " › ", in Title Case, 2–3 levels deep.
 ${ts.length ? `Reuse one of my existing topics where it fits:\n${ts.map(t => '- ' + t).join('\n')}` : 'I have no topics yet, so choose sensible ones.'}
 
-Optionally, add prerequisite links between topics: "topic" builds on "requires". They're drawn on my knowledge map and never affect scheduling. Only add direct, real dependencies, and don't link a topic to its own parent.
+Optionally, add prerequisite links between topics: "topic" builds on "requires". They're shown on my knowledge map and never affect scheduling. Only add direct, real dependencies, and don't link a topic to its own parent.
 ${st.links.length ? `Links I already have:\n${st.links.map(l => `- ${l.topic} requires ${l.requires}`).join('\n')}` : ''}
 
 Reply with only this JSON in a code block, nothing else ("links" may be omitted):

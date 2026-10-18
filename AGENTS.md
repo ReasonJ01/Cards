@@ -61,7 +61,7 @@ export: one card per line as `question;answer;topic` (or tab-separated).
 ## Prerequisites (optional)
 
 Topics can name other topics they build on, e.g. `Computing › Rust › Lifetimes`
-requires `Computing › Rust › Ownership`. These links are only drawn on the
+requires `Computing › Rust › Ownership`. These links are only shown on the
 app's knowledge map; they never change scheduling. When you add cards for a
 new topic that clearly depends on an existing one, add the link too. Keep it
 to direct, real dependencies. Don't link a topic to its own parent, since the

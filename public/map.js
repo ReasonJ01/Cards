@@ -1,6 +1,6 @@
 // Knowledge map: an overlay model. The domain is the topic tree plus optional
-// prerequisite links (listed as "builds on"); the learner layer is FSRS recall
-// averaged per topic.
+// prerequisite links (edited in each topic's sheet); the learner layer is FSRS
+// recall averaged per topic.
 // Purely visual — nothing here affects scheduling or which cards are shown.
 import { retrievability } from './fsrs.js';
 
@@ -35,34 +35,38 @@ function build(ctx) {
 // Which topics are expanded on the map (per device). Top level shows by default.
 let open;
 try { open = new Set(JSON.parse(localStorage.getItem('bloom-map-open')) || []) } catch { open = new Set() }
-const visible = (path, nodes) => path.split(' › ').every((_, i, a) => i === a.length - 1 || open.has(a.slice(0, i + 1).join(' › ')));
 
 export function map(ctx) {
   const { app } = ctx, { nodes, byPath } = build(ctx), links = ctx.links().filter(l => byPath.has(l.topic) && byPath.has(l.requires));
   const started = nodes.filter(n => n.studied).length;
-  const leaves = nodes.filter(n => !nodes.some(m => m.path.startsWith(n.path + ' › ')));
-  const dot = p => `<span class="pre"><i style="background:${colorOf(byPath.get(p).recall)}"></i>${esc(name(p))}</span>`;
-  const rows = nodes.map((n, i) => {
-    if (!visible(n.path, nodes)) return '';
-    const kids = nodes.some(m => m.path.startsWith(n.path + ' › ')), reqs = links.filter(l => l.topic === n.path).map(l => l.requires);
-    return `<div class="trow" style="--d:${n.depth}">
-      ${kids ? `<button class="tog ${open.has(n.path) ? 'open' : ''}" data-tog="${esc(n.path)}" aria-label="${open.has(n.path) ? 'Collapse' : 'Expand'} ${esc(n.path)}" aria-expanded="${open.has(n.path)}">›</button>` : '<span class="tog"></span>'}
-      <button class="mrow ${n.path === selected ? 'sel' : ''} ${n.depth ? '' : 'top'}" data-i="${i}">
-        <span class="mtop"><span class="nm">${esc(name(n.path))}</span><span class="pc">${pctOf(n.recall)}</span></span>
-        <span class="meter"><i style="width:${n.recall == null ? 0 : Math.round(n.recall * 100)}%;background:${colorOf(n.recall)}"></i></span>
-        <span class="msub">${n.studied} of ${n.total} studied${reqs.length ? `<span class="reqs">builds on ${reqs.map(dot).join('')}</span>` : ''}</span>
+  const kids = p => nodes.filter(n => n.depth === (p ? p.split(' › ').length : 0) && (!p || n.path.startsWith(p + ' › ')));
+  const leaves = nodes.filter(n => !kids(n.path).length);
+  // Tree diagram: each row carries one guide column per ancestor (a line while
+  // that ancestor has later siblings) and an elbow joining it to its parent.
+  const rows = [];
+  const walk = (parent, guides) => kids(parent).forEach((n, i, sib) => {
+    const last = i === sib.length - 1, hasKids = kids(n.path).length > 0, isOpen = open.has(n.path);
+    rows.push(`<div class="tnode ${n.path === selected ? 'sel' : ''}">
+      ${guides.map(g => `<span class="g ${g ? 'line' : ''}"></span>`).join('')}${n.depth ? `<span class="g elbow ${last ? 'last' : ''}"></span>` : ''}
+      ${hasKids ? `<button class="tw ${isOpen ? 'open' : ''}" data-tog="${esc(n.path)}" aria-label="${isOpen ? 'Collapse' : 'Expand'} ${esc(n.path)}" aria-expanded="${isOpen}">›</button>` : `<span class="tw leaf" style="background:${colorOf(n.recall)}"></span>`}
+      <button class="tn ${n.depth ? '' : 'root'}" data-path="${esc(n.path)}">
+        <span class="nm">${esc(name(n.path))}</span>
+        <span class="bar2"><i style="width:${n.recall == null ? 0 : Math.round(n.recall * 100)}%;background:${colorOf(n.recall)}"></i></span>
+        <span class="pc">${pctOf(n.recall)}</span>
       </button>
-    </div>`;
-  }).join('');
+    </div>`);
+    if (hasKids && isOpen) walk(n.path, n.depth ? [...guides, !last] : []);
+  });
+  walk('', []);
   app.innerHTML = `
     <div class="bar"><button class="x" aria-label="Back">←</button><div class="serif" style="flex:1;font-size:22px">Knowledge map</div></div>
-    <p class="sub" style="margin:0 4px 12px">Each topic is shaded by how much you'd recall right now. ${links.length ? '“Builds on” lists a topic’s prerequisites, each dot showing how well you know it.' : 'Tap a topic to say what it builds on.'}</p>
-    <div class="legend wide" style="margin:0 4px 14px">${RAMP.map((c, i) => `<span><i style="background:${c}"></i>${BANDS[i]}</span>`).join('')}<span><i style="background:${EMPTY}"></i>not started</span></div>
-    ${nodes.length ? `<div class="maplist">${rows}</div>
+    <p class="sub" style="margin:0 4px 12px">Your topics, shaded by how much you'd recall right now. Tap a topic for details and prerequisites.</p>
+    <div class="legend wide" style="margin:0 4px 16px">${RAMP.map((c, i) => `<span><i style="background:${c}"></i>${BANDS[i]}</span>`).join('')}<span><i style="background:${EMPTY}"></i>not started</span></div>
+    ${nodes.length ? `<div class="tree panel">${rows.join('')}</div>
       <p class="sub" style="margin:14px 4px">${started} of ${nodes.length} topics started · ${leaves.filter(n => n.recall >= .9).length} of ${leaves.length} at 90%+</p>`
       : '<p class="empty">No topics yet.</p>'}`;
   app.querySelector('.x').onclick = ctx.goBack;
-  app.querySelectorAll('.mrow').forEach(b => b.onclick = () => { selected = nodes[+b.dataset.i].path; map(ctx); details(ctx, byPath, links) });
+  app.querySelectorAll('.tn').forEach(b => b.onclick = () => { selected = b.dataset.path; map(ctx); details(ctx, byPath, links) });
   app.querySelectorAll('[data-tog]').forEach(b => b.onclick = () => {
     const t = b.dataset.tog; open.has(t) ? open.delete(t) : open.add(t);
     try { localStorage.setItem('bloom-map-open', JSON.stringify([...open])) } catch {}

@@ -172,22 +172,24 @@ details table { max-height: 240px }
 .pv .muted { color: var(--muted) } .pv .warn { color: #e4a08d; font-size: 13px }
 .sheet form { max-height: 92dvh; overflow-y: auto }
 
-/* Knowledge map */
+/* Knowledge map: tree diagram */
 .links #map { grid-column: span 2 }
-.maplist .trow .tog { height: 52px }
-.mrow { flex: 1; min-width: 0; display: grid; gap: 7px; text-align: left; padding: 12px 14px; margin-bottom: 8px; background: var(--surface); border-radius: 16px }
-.mrow.sel { box-shadow: inset 0 0 0 1px var(--brass) }
-.mrow:active { background: var(--raised) }
-.mtop { display: flex; justify-content: space-between; align-items: baseline; gap: 12px }
-.mrow .nm { font-size: 15px; line-height: 1.3; overflow-wrap: anywhere }
-.mrow.top .nm { font-weight: 600; font-size: 16px }
-.mrow .pc { flex: none; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums }
-.meter { height: 6px; border-radius: 3px; background: #1c4a3a; overflow: hidden }
-.meter i { display: block; height: 100%; border-radius: 3px }
-.msub { color: var(--muted); font-size: 12px; line-height: 1.5 }
-.reqs { display: block; margin-top: 2px }
-.pre { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; color: var(--ink) }
-.pre i { width: 8px; height: 8px; border-radius: 50%; flex: none }
+.tree { padding: 8px 10px 8px 6px }
+.tnode { display: flex; align-items: stretch; min-height: 44px }
+.tnode .g { flex: none; width: 18px; position: relative }
+.tnode .g.line::before, .tnode .g.elbow::before { content: ''; position: absolute; left: 8px; top: 0; bottom: 0; border-left: 1.5px solid #ffffff3d }
+.tnode .g.elbow.last::before { bottom: 50% }
+.tnode .g.elbow::after { content: ''; position: absolute; left: 8px; right: 0; top: 50%; border-top: 1.5px solid #ffffff3d }
+.tw { flex: none; width: 26px; display: grid; place-items: center; color: var(--muted); font-size: 18px; transition: transform .2s }
+.tw.open { transform: rotate(90deg) }
+.tw.leaf { width: 9px; height: 9px; border-radius: 50%; align-self: center; margin: 0 9px 0 8px; box-shadow: 0 0 0 1px #ffffff40 }
+.tn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0 6px; border-radius: 10px; text-align: left }
+.tn:active, .tnode.sel .tn { background: var(--raised) }
+.tn .nm { flex: 1; min-width: 0; font-size: 15px; line-height: 1.25; padding: 8px 0; overflow-wrap: anywhere }
+.tn.root .nm { font-weight: 600 }
+.bar2 { flex: none; width: 44px; height: 5px; border-radius: 3px; background: #1c4a3a; overflow: hidden }
+.bar2 i { display: block; height: 100%; border-radius: 3px }
+.tn .pc { flex: none; width: 38px; text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums }
 .deps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px }
 .chip.dep { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); white-space: normal; text-align: left }
 .chip.dep i { width: 9px; height: 9px; border-radius: 50%; flex: none }
@@ -209,4 +211,3 @@ select { width: 100%; font: inherit; font-size: 15px; color: var(--ink); backgro
 .row small { overflow-wrap: anywhere }
 .row code { font-size: .88em }
 .row > span { white-space: nowrap }
-.pre i { box-shadow: 0 0 0 1px #ffffff40 }
