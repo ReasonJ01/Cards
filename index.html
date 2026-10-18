@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bloom Cards</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Nunito:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#fff8f0;--card:#fff;--ink:#2d2a32;--soft:#8a8394;--again:#ff7a7a;--hard:#ffb84d;--good:#5cc98a;--easy:#6aa8ff;--accent:#c084fc;--shadow:0 10px 30px #2d2a3218}
+@media (prefers-color-scheme:dark){:root{--bg:#1d1b24;--card:#2a2733;--ink:#f3eefc;--soft:#a39cb3;--shadow:0 10px 30px #0006}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.5 Nunito,sans-serif;min-height:100vh}
+h1,h2,.front,.back{font-family:Fraunces,serif}
+header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;max-width:760px;margin:auto}
+h1{margin:0;font-size:26px}h1 span{display:inline-block;animation:sway 3s ease-in-out infinite}
+@keyframes sway{50%{transform:rotate(12deg)}}
+nav button,.btn{border:0;border-radius:999px;padding:9px 16px;font:inherit;font-weight:700;cursor:pointer;background:var(--card);color:var(--ink);box-shadow:var(--shadow);transition:transform .15s}
+nav button:hover,.btn:hover{transform:translateY(-2px)}nav button.on{background:var(--accent);color:#fff}
+main{max-width:760px;margin:auto;padding:0 16px 60px}
+.garden{font-size:28px;letter-spacing:4px;text-align:center;min-height:44px;margin:4px 0 12px}
+.stats{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;color:var(--soft);font-size:14px}
+.stats b{color:var(--ink)}
+.card{background:var(--card);border-radius:28px;box-shadow:var(--shadow);padding:44px 28px;margin:22px 0;text-align:center;min-height:260px;display:flex;flex-direction:column;justify-content:center;gap:18px;animation:pop .35s cubic-bezier(.3,1.6,.5,1)}
+@keyframes pop{from{transform:scale(.92) rotate(-1deg);opacity:0}}
+.front{font-size:30px}.back{font-size:24px;color:var(--soft);border-top:2px dashed #c084fc55;padding-top:18px}
+.grades{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.grades button{border:0;border-radius:20px;padding:14px 4px;font:inherit;font-weight:700;color:#fff;cursor:pointer;transition:transform .15s}
+.grades button:hover{transform:translateY(-4px) scale(1.03)}.grades small{display:block;font-weight:400;opacity:.9;font-size:13px}
+.g1{background:var(--again)}.g2{background:var(--hard)}.g3{background:var(--good)}.g4{background:var(--easy)}
+.reveal{width:100%;padding:16px;font-size:18px;background:var(--accent);color:#fff}
+.hint{text-align:center;color:var(--soft);font-size:13px;margin-top:10px}
+.done{text-align:center;padding:50px 10px}.done .big{font-size:72px;animation:sway 2s infinite}
+form{display:grid;gap:10px;background:var(--card);padding:20px;border-radius:24px;box-shadow:var(--shadow)}
+input,textarea,select{font:inherit;padding:12px;border-radius:14px;border:2px solid #c084fc44;background:var(--bg);color:var(--ink)}
+textarea{min-height:80px}
+.list{margin-top:18px;display:grid;gap:8px}
+.row{background:var(--card);border-radius:16px;padding:10px 14px;display:flex;justify-content:space-between;gap:10px;align-items:center}
+.row span{color:var(--soft);font-size:13px;white-space:nowrap}.row button{border:0;background:none;cursor:pointer;font-size:16px}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 20px;border-radius:999px;font-weight:700;animation:pop .3s}
+.confetti{position:fixed;top:-20px;pointer-events:none;font-size:22px;animation:fall linear forwards}
+@keyframes fall{to{transform:translateY(110vh) rotate(720deg)}}
+@media (max-width:500px){.grades{grid-template-columns:repeat(2,1fr)}.front{font-size:24px}}
+</style>
+</head>
+<body>
+<header><h1><span>🌷</span> Bloom</h1><nav><button data-v="study" class="on">Study</button> <button data-v="add">Add</button> <button data-v="browse">Garden</button></nav></header>
+<main id="app"></main>
+<script type="module">
+import { review, preview, retrievability } from './fsrs.js';
+
+const KEY = 'bloom-v1';
+const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) } catch { return null } };
+let db = load() || { cards: [], log: {}, streak: 0, lastDay: null, retention: 0.9 };
+if (!db.cards.length) db.cards = [
+  { id: 1, deck: 'Welcome', front: 'What does FSRS stand for?', back: 'Free Spaced Repetition Scheduler', due: 0 },
+  { id: 2, deck: 'Welcome', front: 'Press <b>space</b> to flip, then…', back: '1 Again · 2 Hard · 3 Good · 4 Easy', due: 0 },
+  { id: 3, deck: 'Welcome', front: 'Your garden grows with every review 🌱', back: 'Come back tomorrow to keep your streak!', due: 0 },
+];
+const save = () => localStorage.setItem(KEY, JSON.stringify(db));
+const today = () => new Date().toISOString().slice(0, 10);
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmt = ms => { const m = ms / 6e4; return m < 60 ? Math.round(m) + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : m < 43200 ? Math.round(m / 1440) + 'd' : m < 525600 ? (m / 43200).toFixed(1) + 'mo' : (m / 525600).toFixed(1) + 'y' };
+const app = document.getElementById('app');
+const PRAISE = ['Lovely!', 'Nailed it ✨', 'Brain go brrr', 'Blooming!', 'So good', 'Look at you go', 'Chef’s kiss 🤌'];
+const FLOWERS = ['🌱', '🌿', '🌷', '🌸', '🌼', '🌻', '🌺', '🪷'];
+let view = 'study', flipped = false, combo = 0;
+
+function toast(t) { document.querySelector('.toast')?.remove(); const e = document.createElement('div'); e.className = 'toast'; e.textContent = t; document.body.append(e); setTimeout(() => e.remove(), 1400) }
+function confetti(n = 30) { for (let i = 0; i < n; i++) { const e = document.createElement('div'); e.className = 'confetti'; e.textContent = FLOWERS[i % FLOWERS.length]; e.style.left = Math.random() * 100 + 'vw'; e.style.animationDuration = 1.5 + Math.random() * 2 + 's'; document.body.append(e); setTimeout(() => e.remove(), 4000) } }
+const dueCards = () => db.cards.filter(c => c.due <= Date.now()).sort((a, b) => a.due - b.due);
+const garden = () => { const n = db.log[today()] || 0; return FLOWERS.slice(0, 1).concat(Array.from({ length: Math.min(n, 24) }, (_, i) => FLOWERS[1 + (i * 7 + n) % 7])).join('') };
+
+function render() {
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === view));
+  ({ study, add, browse })[view]();
+}
+
+function study() {
+  const due = dueCards(), c = due[0];
+  const stats = `<div class="garden">${garden()}</div><div class="stats"><span>Due <b>${due.length}</b></span>·<span>Today <b>${db.log[today()] || 0}</b></span>·<span>Streak <b>${db.streak}🔥</b></span>${combo > 2 ? `·<span>Combo <b>×${combo}</b></span>` : ''}</div>`;
+  if (!c) { app.innerHTML = stats + `<div class="done"><div class="big">🌻</div><h2>All bloomed for now!</h2><p>Nothing due. Your memory garden is resting.<br>Next card in ${db.cards.length ? fmt(Math.min(...db.cards.map(c => c.due)) - Date.now()) : '—'}.</p><button class="btn" onclick="go('add')">Plant new cards</button></div>`; return }
+  const iv = preview(c, Date.now(), db.retention), names = ['Again', 'Hard', 'Good', 'Easy'];
+  app.innerHTML = stats + `<div class="card" key="${c.id}"><div class="front">${c.front}</div>${flipped ? `<div class="back">${c.back}</div>` : ''}</div>` +
+    (flipped ? `<div class="grades">${names.map((n, i) => `<button class="g${i + 1}" data-g="${i + 1}">${n}<small>${fmt(iv[i])}</small></button>`).join('')}</div>`
+      : `<button class="btn reveal" id="flip">Show answer</button>`) +
+    `<div class="hint">${c.deck} · ${c.s ? `stability ${c.s.toFixed(1)}d · recall ${Math.round(retrievability((Date.now() - c.last) / 864e5, c.s) * 100)}%` : 'new seed 🌱'}</div>`;
+  document.getElementById('flip')?.addEventListener('click', () => { flipped = true; render() });
+  app.querySelectorAll('[data-g]').forEach(b => b.onclick = () => grade(+b.dataset.g));
+}
+
+function grade(g) {
+  const c = dueCards()[0]; if (!c) return;
+  Object.assign(c, review(c, g, Date.now(), db.retention));
+  const t = today();
+  if (db.lastDay !== t) { const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10); db.streak = db.lastDay === y ? db.streak + 1 : 1; db.lastDay = t }
+  db.log[t] = (db.log[t] || 0) + 1;
+  combo = g === 1 ? 0 : combo + 1;
+  if (g > 1 && Math.random() < .35) toast(PRAISE[Math.random() * PRAISE.length | 0]);
+  if (combo && combo % 10 === 0) { toast(`${combo} in a row! 🎉`); confetti(20) }
+  flipped = false; save();
+  if (!dueCards().length) confetti(50);
+  render();
+}
+
+function add() {
+  const decks = [...new Set(db.cards.map(c => c.deck))];
+  app.innerHTML = `<form id="f"><h2 style="margin:0">Plant a card 🌱</h2>
+    <input name="deck" list="decks" placeholder="Deck" value="${esc(localStorage.getItem('bloom-deck') || decks[0] || 'Default')}" required><datalist id="decks">${decks.map(d => `<option>${esc(d)}`).join('')}</datalist>
+    <textarea name="front" placeholder="Front" required></textarea><textarea name="back" placeholder="Back" required></textarea>
+    <button class="btn reveal">Plant it (Ctrl+Enter)</button></form>
+    <p class="hint">Bulk import: paste lines like <code>front;back</code> or <code>front⇥back</code> (Anki text export works).</p>
+    <form id="bulk"><textarea name="t" placeholder="question;answer"></textarea><button class="btn">Import</button></form>`;
+  const f = document.getElementById('f');
+  f.front.focus();
+  f.onsubmit = e => { e.preventDefault(); localStorage.setItem('bloom-deck', f.deck.value); db.cards.push({ id: Date.now(), deck: f.deck.value, front: esc(f.front.value), back: esc(f.back.value), due: 0 }); save(); toast('Planted! 🌱'); f.front.value = f.back.value = ''; f.front.focus() };
+  f.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) f.requestSubmit() };
+  document.getElementById('bulk').onsubmit = e => {
+    e.preventDefault(); let n = 0;
+    e.target.t.value.split('\n').forEach((l, i) => { const [a, b] = l.split(/\t|;/); if (a && b && !l.startsWith('#')) { db.cards.push({ id: Date.now() + i, deck: f.deck.value, front: a.trim(), back: b.trim(), due: 0 }); n++ } });
+    save(); toast(`Planted ${n} cards 🌸`); if (n) confetti(15); e.target.t.value = '';
+  };
+}
+
+function browse() {
+  const q = (document.getElementById('q')?.value || '').toLowerCase();
+  const mature = db.cards.filter(c => c.s > 21).length;
+  app.innerHTML = `<div class="stats" style="margin:10px 0"><span><b>${db.cards.length}</b> cards</span>·<span><b>${mature}</b> in full bloom 🌻</span>·<span>retention target
+    <select id="ret">${[.8, .85, .9, .95].map(r => `<option ${r === db.retention ? 'selected' : ''}>${r}</option>`).join('')}</select></span></div>
+    <input id="q" placeholder="Search…" value="${esc(q)}" style="width:100%">
+    <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="exp">Export</button><label class="btn">Restore<input type="file" id="imp" hidden accept=".json"></label></div>
+    <div class="list">${db.cards.filter(c => (c.front + c.back + c.deck).toLowerCase().includes(q)).map(c =>
+      `<div class="row"><div>${c.s > 21 ? '🌻' : c.s > 3 ? '🌿' : '🌱'} ${c.front}</div><span>${c.deck} · ${c.due <= Date.now() ? 'due' : 'in ' + fmt(c.due - Date.now())} <button data-del="${c.id}" title="Delete">🗑️</button></span></div>`).join('')}</div>`;
+  const qi = document.getElementById('q'); qi.oninput = () => { browse(); const n = document.getElementById('q'); n.focus(); n.setSelectionRange(99, 99) };
+  document.getElementById('ret').onchange = e => { db.retention = +e.target.value; save(); toast('Saved') };
+  app.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { if (confirm('Pull this card?')) { db.cards = db.cards.filter(c => c.id != b.dataset.del); save(); browse() } });
+  document.getElementById('exp').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(db)], { type: 'application/json' })); a.download = 'bloom-backup.json'; a.click() };
+  document.getElementById('imp').onchange = async e => { try { db = JSON.parse(await e.target.files[0].text()); save(); toast('Restored 🌷'); browse() } catch { toast('That file looks wilted 🥀') } };
+}
+
+window.go = v => { view = v; flipped = false; render() };
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => go(b.dataset.v));
+document.addEventListener('keydown', e => {
+  if (view !== 'study' || e.target.matches('input,textarea,select')) return;
+  if ((e.key === ' ' || e.key === 'Enter') && !flipped) { e.preventDefault(); flipped = true; render() }
+  else if (flipped && '1234'.includes(e.key)) grade(+e.key);
+  else if (flipped && e.key === ' ') { e.preventDefault(); grade(3) }
+});
+render();
+</script>
+</body>
+</html>
