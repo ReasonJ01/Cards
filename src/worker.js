@@ -1,3 +1,5 @@
+import { checkLink } from '../public/dag.js';
+
 // Bloom API. Every /api route except /api/status and /api/claim needs
 // `Authorization: Bearer <key>`. The key is chosen by whoever claims the
 // instance first; only its SHA-256 is stored.
@@ -77,10 +79,23 @@ export default {
     if (path === '/api/links' && M === 'GET') return json((await db.prepare('SELECT topic, requires FROM links ORDER BY topic').all()).results);
     if (path === '/api/links' && (M === 'POST' || M === 'DELETE')) {
       const list = (Array.isArray(body) ? body : body?.links || [body]).map(l => ({ topic: normTopic(l?.topic), requires: normTopic(l?.requires) }));
-      if (list.some(l => !l.topic || !l.requires || l.topic === l.requires)) return json({ error: 'send {links: [{topic, requires}]} with two different topics' }, 400);
-      const sql = M === 'POST' ? 'INSERT OR IGNORE INTO links (topic, requires) VALUES (?, ?)' : 'DELETE FROM links WHERE topic = ? AND requires = ?';
-      await db.batch(list.map(l => db.prepare(sql).bind(l.topic, l.requires)));
-      return json({ ok: true, count: list.length });
+      if (!list.length || list.some(l => !l.topic || !l.requires)) return json({ error: 'send {links: [{topic, requires}]}' }, 400);
+      if (M === 'DELETE') {
+        await db.batch(list.map(l => db.prepare('DELETE FROM links WHERE topic = ? AND requires = ?').bind(l.topic, l.requires)));
+        return json({ ok: true, count: list.length });
+      }
+      // Links must keep the graph acyclic; check each against everything before it.
+      const links = (await db.prepare('SELECT topic, requires FROM links').all()).results;
+      const added = [], skipped = [], warnings = [];
+      for (const l of list) {
+        const c = checkLink(links, l.topic, l.requires);
+        if (c.error) { skipped.push({ ...l, reason: c.error }); continue }
+        if (c.warning === 'already linked') { skipped.push({ ...l, reason: c.warning }); continue }
+        if (c.warning) warnings.push({ ...l, warning: c.warning });
+        links.push(l); added.push(l);
+      }
+      if (added.length) await db.batch(added.map(l => db.prepare('INSERT OR IGNORE INTO links (topic, requires) VALUES (?, ?)').bind(l.topic, l.requires)));
+      return json({ added, skipped, warnings }, added.length ? 201 : 200);
     }
 
     if (path === '/api/cards' && M === 'GET') {

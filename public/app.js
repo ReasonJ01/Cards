@@ -2,6 +2,7 @@ import { review, preview, retrievability } from './fsrs.js';
 import { stats } from './stats.js';
 import { map } from './map.js';
 import { parsePaste, normTopic, normQ } from './paste.js';
+import { checkLink } from './dag.js';
 
 const KEY = 'bloom-v2', ROUND = 10, NEW_PER_DAY = 15, GILD_CHANCE = 1 / 12;
 const XP = { 1: 4, 2: 8, 3: 10, 4: 12 };
@@ -439,9 +440,14 @@ function openImport() {
       const card = { ...c, topic: c.topic || normTopic(def) || 'Inbox' }, k = card.topic + '\n' + normQ(card.q);
       (seen.has(k) ? dups : fresh).push(card); seen.add(k);
     }
-    const have = new Set(st.links.map(l => l.topic + '\n' + l.requires));
-    const links = (r.links || []).filter(l => { const k = l.topic + '\n' + l.requires; return !have.has(k) && (have.add(k), true) });
-    return { fresh, dups, links, errors: r.errors, needsTopic: r.cards.some(c => !c.topic) };
+    // Same rules as the API: no loops, no parent/child links; flag implied ones.
+    const graph = [...st.links], links = [], linkIssues = [], implied = [];
+    for (const l of r.links || []) {
+      const c = checkLink(graph, l.topic, l.requires);
+      if (c.error) linkIssues.push(`${l.topic.split(' › ').at(-1)} → ${l.requires.split(' › ').at(-1)}: ${c.error.replace(/(?:[^›→: ][^›→:]* › )+/g, '')}`);
+      else if (c.warning !== 'already linked') { if (c.warning) implied.push(l); graph.push(l); links.push(l) }
+    }
+    return { fresh, dups, links, implied, errors: [...r.errors, ...linkIssues], needsTopic: r.cards.some(c => !c.topic) };
   };
   const preview = () => {
     const p = parse(), groups = new Map();
@@ -450,6 +456,7 @@ function openImport() {
       ${p.needsTopic ? `<div class="label0" style="margin:6px 0">Cards without a topic go to</div><div class="chips">${[...new Set([def, ...topics()])].map(t => `<button type="button" class="chip ${t === def ? 'on' : ''}" data-def="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
       <div class="pv">${[...groups].map(([t, n]) => `<div><span>${esc(t)}</span><b>${n}</b></div>`).join('')}
       ${p.links.length ? `<div><span>Prerequisite links</span><b>${p.links.length}</b></div>` : ''}
+      ${p.implied.length ? `<div class="muted"><span>Of those, already implied by other links (added anyway)</span><b>${p.implied.length}</b></div>` : ''}
       ${p.dups.length ? `<div class="muted"><span>Already in your deck, skipped</span><b>${p.dups.length}</b></div>` : ''}
       ${p.errors.length ? `<div class="warn"><span>${p.errors.slice(0, 4).map(esc).join('<br>')}${p.errors.length > 4 ? `<br>and ${p.errors.length - 4} more` : ''}</span><b>${p.errors.length}</b></div>` : ''}</div>`;
     pv.querySelectorAll('[data-def]').forEach(b => b.onclick = () => { def = b.dataset.def; preview() });

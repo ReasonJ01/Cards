@@ -64,8 +64,16 @@ Topics can name other topics they build on, e.g. `Computing › Rust › Lifetim
 requires `Computing › Rust › Ownership`. These links are only shown on the
 app's knowledge map; they never change scheduling. When you add cards for a
 new topic that clearly depends on an existing one, add the link too. Keep it
-to direct, real dependencies. Don't link a topic to its own parent, since the
-tree already shows that.
+to direct, real dependencies.
+
+Links must form a DAG. `POST /links` returns `{added, skipped, warnings}`:
+- **Skipped** (not saved): a link that would create a loop (the reason names
+  the chain), a link between a topic and its own parent or child (the tree
+  already shows that), or one that already exists.
+- **Warnings** (saved): a link already implied by others, e.g. adding
+  A → C when A → B → C exists. Prefer removing it unless it's deliberate.
+
+Report skips and warnings to the user.
 
 ## Writing good cards
 

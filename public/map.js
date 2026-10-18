@@ -3,6 +3,7 @@
 // recall averaged per topic.
 // Purely visual — nothing here affects scheduling or which cards are shown.
 import { retrievability } from './fsrs.js';
+import { checkLink } from './dag.js';
 
 const DAY = 864e5;
 const RAMP = ['#6b5a35', '#9a7f45', '#c9a35a', '#ecd39b'], EMPTY = '#1c4a3a';
@@ -180,8 +181,8 @@ function details(ctx, byPath, links) {
   const n = byPath.get(selected), sheet = ctx.sheet;
   const reqs = links.filter(l => l.topic === n.path).map(l => l.requires), deps = links.filter(l => l.requires === n.path).map(l => l.topic);
   // Offer topics that wouldn't create a cycle.
-  const dependsOn = (a, b, seen = new Set()) => a === b || (!seen.has(a) && (seen.add(a), links.some(l => l.topic === a && dependsOn(l.requires, b, seen))));
-  const options = [...byPath.keys()].filter(p => p !== n.path && !reqs.includes(p) && !dependsOn(p, n.path));
+  // Offer only links the shared rules allow (no loops, no parent/child); mark implied ones.
+  const options = [...byPath.keys()].map(p => ({ p, c: checkLink(links, n.path, p) })).filter(o => !o.c.error && o.c.warning !== 'already linked');
   const chip = (p, removable) => { const m = byPath.get(p); return `<span class="chip dep"><i style="background:${colorOf(m?.recall)}"></i>${esc(p)} <small>${pctOf(m?.recall)}</small>${removable ? `<button type="button" data-rm="${esc(p)}" aria-label="Remove">×</button>` : ''}</span>` };
   sheet.innerHTML = `<form>
     <div style="display:flex;justify-content:space-between;align-items:center"><span class="serif" style="font-size:20px">${esc(name(n.path))}</span><button type="button" class="chip" data-close>Done</button></div>
@@ -193,7 +194,7 @@ function details(ctx, byPath, links) {
     </div>
     <div><div class="label0" style="margin-bottom:6px">Requires</div>
       <div class="deps">${reqs.map(p => chip(p, true)).join('') || '<small style="color:var(--muted)">Nothing yet.</small>'}</div>
-      ${options.length ? `<select id="addreq"><option value="">+ Add a prerequisite…</option>${options.map(p => `<option>${esc(p)}</option>`).join('')}</select>` : ''}
+      ${options.length ? `<select id="addreq"><option value="">+ Add a prerequisite…</option>${options.map(o => `<option value="${esc(o.p)}">${esc(o.p)}${o.c.warning ? ' (already implied)' : ''}</option>`).join('')}</select>` : ''}
     </div>
     ${deps.length ? `<div><div class="label0" style="margin-bottom:6px">Needed for</div><div class="deps">${deps.map(p => chip(p, false)).join('')}</div></div>` : ''}
     ${n.weakest.length ? `<div><div class="label0" style="margin-bottom:6px">Shakiest cards</div>${n.weakest.map(({ c, r }) => `<div class="pv"><div><span>${esc(c.q)}</span><b>${pctOf(r)}</b></div></div>`).join('')}</div>` : ''}
