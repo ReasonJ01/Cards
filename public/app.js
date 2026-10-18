@@ -81,25 +81,42 @@ function ready(topic) {
   return { due, fresh, total: due.length + fresh.length };
 }
 
+// Motion: short, eased, and skipped entirely under prefers-reduced-motion.
+const still = matchMedia('(prefers-reduced-motion: reduce)');
+const ease = k => 1 - (1 - k) ** 3;
+function countUp(el, from, to, ms = 600, show = n => n) {
+  if (!el) return;
+  if (still.matches || from === to) { el.textContent = show(to); return }
+  const t0 = performance.now();
+  const step = t => { const k = Math.min(1, (t - t0) / ms); el.textContent = show(Math.round(from + (to - from) * ease(k))); if (k < 1) requestAnimationFrame(step) };
+  el.textContent = show(from); requestAnimationFrame(step);
+}
+const later = (fn, ms) => still.matches ? fn() : setTimeout(fn, ms);
+let homeXp = null;
+
 function toast(t) { document.querySelector('.toast')?.remove(); const e = Object.assign(document.createElement('div'), { className: 'toast', textContent: t }); document.body.append(e); setTimeout(() => e.remove(), 1600) }
 function float(t) { const e = Object.assign(document.createElement('div'), { className: 'float', textContent: t }); document.body.append(e); setTimeout(() => e.remove(), 1000) }
 
 /* ---------- Home ---------- */
 function home() {
   round = null;
-  const L = levelOf(st.xp), p = (st.xp - levelStart(L)) / (levelStart(L + 1) - levelStart(L));
+  const L = levelOf(st.xp), span = levelStart(L + 1) - levelStart(L), p = (st.xp - levelStart(L)) / span;
+  const from = homeXp == null ? st.xp : Math.max(levelStart(L), homeXp), p0 = (from - levelStart(L)) / span;
+  homeXp = st.xp;
   const all = ready(), C = 2 * Math.PI * 25;
   const rows = topics().map(t => { const r = ready(t); return `<button class="topic" data-t="${esc(t)}"><span>${esc(t)}</span><span class="${r.total ? 'hot' : ''}">${r.total ? r.total + ' ready' : '✓'}</span></button>` }).join('');
   app.innerHTML = `
     <div class="top">
-      <div class="ring"><svg width="58" height="58"><circle cx="29" cy="29" r="25" fill="none" stroke="#ffffff14" stroke-width="4"/><circle cx="29" cy="29" r="25" fill="none" stroke="#c9a35a" stroke-width="4" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - p)}"/></svg><b>${L}</b></div>
-      <div class="who"><div class="serif" style="font-size:20px">Level ${L}</div><small>${st.xp - levelStart(L)} / ${levelStart(L + 1) - levelStart(L)} xp</small></div>
+      <div class="ring"><svg width="58" height="58"><circle cx="29" cy="29" r="25" fill="none" stroke="#ffffff14" stroke-width="4"/><circle cx="29" cy="29" r="25" fill="none" stroke="#c9a35a" stroke-width="4" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - p0)}" id="ring"/></svg><b>${L}</b></div>
+      <div class="who"><div class="serif" style="font-size:20px">Level ${L}</div><small><span id="lvxp">${from - levelStart(L)}</span> / ${span} xp</small></div>
       ${st.streak ? `<div class="streak">${st.streak} day${st.streak > 1 ? 's' : ''}</div>` : ''}
     </div>
     ${all.total ? `<button class="hero" data-t=""><div class="label" style="margin:0 0 8px">Everything</div><h2 class="serif">${all.total} ready</h2><small class="label" style="text-transform:none;letter-spacing:0;font-size:14px">A round is ${Math.min(ROUND, all.total)} card${Math.min(ROUND, all.total) > 1 ? 's' : ''}. Stop whenever.</small><div><span class="go">Play a round</span></div></button>`
       : `<div class="hero"><h2 class="serif">All caught up</h2><small style="color:var(--muted)">${deck.length ? 'Nothing is ready. Add something new, or come back later.' : 'No cards yet — tap + to add your first.'}</small></div>`}
     ${rows ? `<div class="label">Focus on a topic</div>${rows}` : ''}
     <button class="fab" aria-label="Add a card">+</button>`;
+  requestAnimationFrame(() => requestAnimationFrame(() => { const ring = document.getElementById('ring'); if (ring) ring.style.strokeDashoffset = C * (1 - p) }));
+  countUp(document.getElementById('lvxp'), from - levelStart(L), st.xp - levelStart(L), 800);
   app.querySelectorAll('[data-t]').forEach(b => b.onclick = () => start(b.dataset.t));
   app.querySelector('.fab').onclick = () => openAdd();
 }
@@ -113,7 +130,7 @@ function start(topic) {
   const q = [...r.due.slice(0, ROUND)], fresh = r.fresh.slice(0, ROUND - Math.min(q.length, ROUND - Math.min(3, r.fresh.length)));
   q.length = Math.min(q.length, ROUND - fresh.length);
   fresh.forEach((c, i) => q.splice(Math.round((i + 1) * q.length / (fresh.length + 1)) + i, 0, c));
-  round = { topic, queue: q, size: q.length, done: 0, xp: 0, combo: 0, best: 0, right: 0, startLevel: levelOf(st.xp), again: new Set() };
+  round = { shown: 0, pct: 0, topic, queue: q, size: q.length, done: 0, xp: 0, combo: 0, best: 0, right: 0, startLevel: levelOf(st.xp), again: new Set() };
   next();
 }
 function next() {
@@ -125,7 +142,7 @@ function draw() {
   const c = round.card, s = st.reviews[c.id];
   const iv = round.flipped ? preview(s || {}, Date.now()) : [];
   app.innerHTML = `
-    <div class="bar"><button class="x" aria-label="End round">×</button><div class="progress"><i style="width:${100 * round.done / round.size}%"></i></div><div class="xp">${round.xp} xp</div></div>
+    <div class="bar"><button class="x" aria-label="End round">×</button><div class="progress"><i style="width:${round.pct || 0}%"></i></div><div class="xp">${round.shown} xp</div></div>
     <div class="combo ${round.combo >= 3 ? 'on' : ''}">COMBO ×${mult().toFixed(1)}</div>
     <div class="card ${round.gilded ? 'gilded' : ''} ${round.flipped ? '' : 'enter'}">
       <div class="t">${round.gilded ? 'Gilded · ×5 xp' : esc(c.topic)}${s ? '' : ' · new'}</div>
@@ -133,6 +150,10 @@ function draw() {
       ${round.flipped ? `<div class="a serif">${md(c.a)}</div>` : '<div class="tap">tap to reveal</div>'}
     </div>
     ${round.flipped ? `<div class="dock"><div class="grades">${['Again', 'Hard', 'Good', 'Easy'].map((n, i) => `<button class="g${i + 1}" data-g="${i + 1}">${n}<small>${fmt(iv[i])}</small></button>`).join('')}</div></div>` : ''}`;
+  const pct = 100 * round.done / round.size, bar = app.querySelector('.progress i');
+  requestAnimationFrame(() => requestAnimationFrame(() => bar.style.width = pct + '%'));
+  countUp(app.querySelector('.xp'), round.shown, round.xp, 450, n => n + ' xp');
+  round.pct = pct; round.shown = round.xp;
   app.querySelector('.x').onclick = () => round.done ? summary() : home();
   app.querySelector('.card').onclick = () => { if (!round.flipped) { round.flipped = true; draw() } };
   app.querySelectorAll('[data-g]').forEach(b => b.onclick = () => grade(+b.dataset.g));
@@ -140,6 +161,7 @@ function draw() {
 const mult = () => 1 + Math.min(round.combo, 10) * 0.1;
 
 function grade(g) {
+  if (round.busy) return;
   const c = round.card, wasNew = !st.reviews[c.id];
   st.reviews[c.id] = review(st.reviews[c.id] || {}, g);
   st.outbox.push({ id: c.id, grade: g, ts: Date.now(), state: st.reviews[c.id] });
@@ -156,7 +178,11 @@ function grade(g) {
   round.done++;
   const t = day();
   if (st.lastDay !== t) { st.streak = st.lastDay === day(Date.now() - 864e5) ? st.streak + 1 : 1; st.lastDay = t }
-  save(); next(); sync();
+  save(); sync();
+  round.busy = true;
+  app.querySelector('.card').classList.add('leave');
+  app.querySelector('.dock')?.classList.add('leave');
+  later(() => { round.busy = false; next() }, 170);
 }
 
 // Variable reward: most draws are modest, a few are big, rarely a jackpot.
@@ -172,20 +198,21 @@ function summary() {
   app.innerHTML = `<div class="summary">
     <div class="label" style="margin:0">Round complete</div>
     <h2 class="serif">${acc >= 90 ? 'Superb' : acc >= 70 ? 'Well played' : 'Good work'}</h2>
-    <div class="stat"><div><b>${R.xp}</b><small class="label">xp</small></div><div><b>${acc}%</b><small class="label">recalled</small></div><div><b>${R.best}</b><small class="label">best combo</small></div></div>
+    <div class="stat"><div><b data-to="${R.xp}">0</b><small class="label">xp</small></div><div><b data-to="${acc}" data-pct>0%</b><small class="label">recalled</small></div><div><b data-to="${R.best}">0</b><small class="label">best combo</small></div></div>
     <button class="chest" id="chest">?</button><small id="cap" style="color:var(--muted)">Tap to draw your bonus</small>
     <div id="lvl"></div>
   </div>
   <div class="dock"><div><button class="btn" id="more" hidden>Another round</button><button class="btn ghost" id="done">Done</button></div></div>`;
+  app.querySelectorAll('[data-to]').forEach((b, i) => later(() => countUp(b, 0, +b.dataset.to, 700, n => b.dataset.pct != null ? n + '%' : n), 150 + i * 120));
   const chest = document.getElementById('chest');
   chest.onclick = () => {
     if (chest.classList.contains('open')) return;
     const [n, label] = draw_bonus();
     st.xp += n; save(); sync();
-    chest.classList.add('open'); chest.textContent = '+' + n;
+    chest.classList.add('open'); countUp(chest, 0, n, n >= 100 ? 1200 : 700, v => '+' + v);
     document.getElementById('cap').textContent = label;
     const L = levelOf(st.xp);
-    if (L > R.startLevel) document.getElementById('lvl').innerHTML = `<p class="levelup">Level ${L} reached</p>`;
+    if (L > R.startLevel) later(() => document.getElementById('lvl').innerHTML = `<p class="levelup">Level ${L} reached</p>`, 800);
     if (ready(R.topic).total) document.getElementById('more').hidden = false;
   };
   document.getElementById('more').onclick = () => start(R.topic);
