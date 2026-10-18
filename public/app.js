@@ -1,4 +1,4 @@
-import { review, preview } from './fsrs.js';
+import { review, preview, retrievability } from './fsrs.js';
 import { stats } from './stats.js';
 import { map } from './map.js';
 import { parsePaste, normTopic, normQ } from './paste.js';
@@ -164,7 +164,7 @@ function home() {
       ${st.streak ? `<div class="streak">${st.streak} day${st.streak > 1 ? 's' : ''}</div>` : ''}
     </div>
     ${all.total ? `<button class="hero" data-t=""><div class="label" style="margin:0 0 8px">Everything</div><h2 class="serif">${all.total} ready</h2><small class="label" style="text-transform:none;letter-spacing:0;font-size:14px">A round is ${Math.min(ROUND, all.total)} card${Math.min(ROUND, all.total) > 1 ? 's' : ''}. Stop whenever.</small><div><span class="go">Play a round</span></div></button>`
-      : `<div class="hero"><h2 class="serif">All caught up</h2><small style="color:var(--muted)">${deck.length ? 'Nothing is ready. Add something new, or come back later.' : 'No cards yet — tap + to add your first.'}</small></div>`}
+      : `<div class="hero"><h2 class="serif">All caught up</h2><small style="color:var(--muted)">${deck.length ? 'Nothing is due. Come back later, add something new, or get ahead on the cards you’re closest to forgetting.' : 'No cards yet — tap + to add your first.'}</small>${ahead('').length ? '<div><button class="go" id="ahead">Review ahead</button></div>' : ''}</div>`}
     ${rows ? `<div class="label">Focus on a topic</div>${rows}` : ''}
     ${deck.length ? `<div class="links"><button class="topic" id="lib">Manage cards</button><button class="topic" id="stats">Statistics</button><button class="topic" id="map">Knowledge map</button></div>` : ''}
     <button class="fab" aria-label="Add a card">+</button>`;
@@ -174,6 +174,7 @@ function home() {
   requestAnimationFrame(() => requestAnimationFrame(() => { const ring = document.getElementById('ring'); if (ring) ring.style.strokeDashoffset = C * (1 - p) }));
   countUp(document.getElementById('lvxp'), from - levelStart(L), st.xp - levelStart(L), 800);
   app.querySelectorAll('[data-t]').forEach(b => b.onclick = () => start(b.dataset.t));
+  document.getElementById('ahead')?.addEventListener('click', () => start('', false, true));
   app.querySelectorAll('[data-tog]').forEach(b => b.onclick = () => {
     const t = b.dataset.tog; open.has(t) ? open.delete(t) : open.add(t);
     try { localStorage.setItem('bloom-open', JSON.stringify([...open])) } catch {}
@@ -184,10 +185,27 @@ function home() {
 
 /* ---------- Round ---------- */
 let round = null;
-function start(topic, replace) {
+// Review ahead: studied cards that aren't due yet, the ones FSRS thinks you're
+// closest to forgetting first. FSRS discounts early reviews on its own, so this
+// can't inflate intervals.
+function ahead(topic) {
+  const now = Date.now(), rec = c => { const s = st.reviews[c.id]; return retrievability((now - s.last) / 864e5, s.s) };
+  return deck.filter(c => inTopic(c, topic) && st.reviews[c.id]?.due > now).sort((a, b) => rec(a) - rec(b));
+}
+
+function start(topic, replace, early) {
   const r = ready(topic);
-  if (!r.total) return toast('Nothing ready here');
+  if (!r.total && !early) {
+    if (!ahead(topic).length) return toast('Nothing ready here');
+    toast('Nothing due here, so reviewing ahead');
+    early = true;
+  }
   nav({ v: 'study' }, replace);
+  if (early) {
+    const q = ahead(topic).slice(0, ROUND);
+    round = { shown: 0, pct: 0, topic, early, queue: q, size: q.length, done: 0, xp: 0, combo: 0, best: 0, right: 0, startLevel: levelOf(st.xp), again: new Set() };
+    return next();
+  }
   // Interleave new cards among reviews so a round never feels like a wall of unknowns.
   const q = [...r.due.slice(0, ROUND)], fresh = r.fresh.slice(0, ROUND - Math.min(q.length, ROUND - Math.min(3, r.fresh.length)));
   q.length = Math.min(q.length, ROUND - fresh.length);
@@ -207,7 +225,7 @@ function draw() {
     <div class="bar"><button class="x" aria-label="End round">×</button><div class="progress"><i style="width:${round.pct || 0}%"></i></div><div class="xp">${round.shown} xp</div></div>
     <div class="combo ${round.combo >= 3 ? 'on' : ''}">COMBO ×${mult().toFixed(1)}</div>
     <div class="card ${round.gilded ? 'gilded' : ''} ${round.flipped ? '' : 'enter'}">
-      <div class="t">${round.gilded ? 'Gilded · ×5 xp' : esc(c.topic)}${s ? '' : ' · new'}</div>
+      <div class="t">${round.gilded ? 'Gilded · ×5 xp' : esc(c.topic)}${s ? (round.early ? ` · ahead, due in ${fmt(s.due - Date.now())}` : '') : ' · new'}</div>
       <div class="q serif">${md(c.q)}</div>
       ${round.flipped ? `<div class="a serif">${md(c.a)}</div>` : '<div class="tap">tap to reveal</div>'}
     </div>
@@ -275,10 +293,10 @@ function summary() {
     chest.classList.add('open'); countUp(chest, 0, n, n >= 100 ? 1200 : 700, v => '+' + v);
     document.getElementById('cap').textContent = label;
     const L = levelOf(st.xp);
-    if (L > R.startLevel) later(() => document.getElementById('lvl').innerHTML = `<p class="levelup">Level ${L} reached</p>`, 800);
-    if (ready(R.topic).total) document.getElementById('more').hidden = false;
+    if (L > R.startLevel) later(() => { const el = document.getElementById('lvl'); if (el) el.innerHTML = `<p class="levelup">Level ${L} reached</p>` }, 800);
+    if (R.early ? ahead(R.topic).length : ready(R.topic).total) document.getElementById('more').hidden = false;
   };
-  document.getElementById('more').onclick = () => start(R.topic, true);
+  document.getElementById('more').onclick = () => start(R.topic, true, R.early);
   document.getElementById('done').onclick = goBack;
 }
 
