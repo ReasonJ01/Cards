@@ -128,7 +128,7 @@ function topicTree() {
     const depth = p.split(' › ').length - 1, kids = all.some(q => q.startsWith(p + ' › ')), r = ready(p);
     return `<div class="trow" style="--d:${depth}">
       ${kids ? `<button class="tog ${open.has(p) ? 'open' : ''}" data-tog="${esc(p)}" aria-label="${open.has(p) ? 'Collapse' : 'Expand'} ${esc(p)}" aria-expanded="${open.has(p)}">›</button>` : '<span class="tog"></span>'}
-      <button class="topic" data-t="${esc(p)}"><span>${esc(p.split(' › ').at(-1))}</span><span class="${r.total ? 'hot' : ''}">${r.total ? r.total + ' ready' : '✓'}</span></button>
+      <button class="topic" data-t="${esc(p)}"><span>${esc(p.split(' › ').at(-1))}</span><span class="${r.total ? 'hot' : ''}">${r.total ? r.total + ' ready' : deck.filter(c => inTopic(c, p)).length + ' cards'}</span></button>
     </div>`;
   }).join('');
 }
@@ -194,24 +194,26 @@ function ahead(topic) {
   return deck.filter(c => inTopic(c, topic) && st.reviews[c.id]?.due > now).sort((a, b) => rec(a) - rec(b));
 }
 
-function start(topic, replace, early) {
+// A round's cards. Picking a topic (or Review ahead) is a deliberate choice, so
+// it always gets a full round: due cards, then that topic's new cards with no
+// daily cap, then studied cards topped up weakest-first. The Everything round
+// keeps to the schedule and the new-card cap.
+function buildQueue(topic, chosen) {
   const r = ready(topic);
-  if (!r.total && !early) {
-    if (!ahead(topic).length) return toast('Nothing ready here');
-    toast('Nothing due here, so reviewing ahead');
-    early = true;
-  }
-  nav({ v: 'study' }, replace);
-  if (early) {
-    const q = ahead(topic).slice(0, ROUND);
-    round = { shown: 0, pct: 0, topic, early, queue: q, size: q.length, done: 0, xp: 0, combo: 0, best: 0, right: 0, startLevel: levelOf(st.xp), again: new Set() };
-    return next();
-  }
+  const fresh = topic ? deck.filter(c => inTopic(c, topic) && !st.reviews[c.id]) : r.fresh;
   // Interleave new cards among reviews so a round never feels like a wall of unknowns.
-  const q = [...r.due.slice(0, ROUND)], fresh = r.fresh.slice(0, ROUND - Math.min(q.length, ROUND - Math.min(3, r.fresh.length)));
-  q.length = Math.min(q.length, ROUND - fresh.length);
-  fresh.forEach((c, i) => q.splice(Math.round((i + 1) * q.length / (fresh.length + 1)) + i, 0, c));
-  round = { shown: 0, pct: 0, topic, queue: q, size: q.length, done: 0, xp: 0, combo: 0, best: 0, right: 0, startLevel: levelOf(st.xp), again: new Set() };
+  const q = r.due.slice(0, ROUND), f = fresh.slice(0, ROUND - Math.min(q.length, ROUND - Math.min(3, fresh.length)));
+  q.length = Math.min(q.length, ROUND - f.length);
+  f.forEach((c, i) => q.splice(Math.round((i + 1) * q.length / (f.length + 1)) + i, 0, c));
+  if (chosen) q.push(...ahead(topic).slice(0, ROUND - q.length));
+  return q;
+}
+
+function start(topic, replace, early) {
+  const chosen = !!topic || !!early, q = buildQueue(topic, chosen);
+  if (!q.length) return toast(topic ? 'No cards in this topic yet' : 'Nothing ready');
+  nav({ v: 'study' }, replace);
+  round = { shown: 0, pct: 0, topic, chosen, queue: q, size: q.length, done: 0, xp: 0, combo: 0, best: 0, right: 0, startLevel: levelOf(st.xp), again: new Set() };
   next();
 }
 function next() {
@@ -226,7 +228,7 @@ function draw() {
     <div class="bar"><button class="x" aria-label="End round">×</button><div class="progress"><i style="width:${round.pct || 0}%"></i></div><div class="xp">${round.shown} xp</div></div>
     <div class="combo ${round.combo >= 3 ? 'on' : ''}">COMBO ×${mult().toFixed(1)}</div>
     <div class="card ${round.gilded ? 'gilded' : ''} ${round.flipped ? '' : 'enter'}">
-      <div class="t">${round.gilded ? 'Gilded · ×5 xp' : esc(c.topic)}${s ? (round.early ? ` · ahead, due in ${fmt(s.due - Date.now())}` : '') : ' · new'}</div>
+      <div class="t">${round.gilded ? 'Gilded · ×5 xp' : esc(c.topic)}${!s ? ' · new' : s.due > Date.now() ? ` · ahead, due in ${fmt(s.due - Date.now())}` : ''}</div>
       <div class="q serif">${md(c.q)}</div>
       ${round.flipped ? `<div class="a serif">${md(c.a)}</div>` : '<div class="tap">tap to reveal</div>'}
     </div>
@@ -295,9 +297,9 @@ function summary() {
     document.getElementById('cap').textContent = label;
     const L = levelOf(st.xp);
     if (L > R.startLevel) later(() => { const el = document.getElementById('lvl'); if (el) el.innerHTML = `<p class="levelup">Level ${L} reached</p>` }, 800);
-    if (R.early ? ahead(R.topic).length : ready(R.topic).total) document.getElementById('more').hidden = false;
+    if (buildQueue(R.topic, R.chosen).length) document.getElementById('more').hidden = false;
   };
-  document.getElementById('more').onclick = () => start(R.topic, true, R.early);
+  document.getElementById('more').onclick = () => start(R.topic, true, R.chosen);
   document.getElementById('done').onclick = goBack;
 }
 
