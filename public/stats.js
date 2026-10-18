@@ -18,7 +18,11 @@ const startOfDay = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return 
 const dateLabel = t => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 const niceMax = v => { if (v <= 4) return 4; const p = 10 ** Math.floor(Math.log10(v)), m = v / p; return (m <= 2 ? 2 : m <= 5 ? 5 : 10) * p };
 
-let filter = { days: 30, topic: '' }, history = null, tips = [];
+let filter = { days: 30, topic: '' }, history = null, tips = [], hideTip = () => {};
+// Registered once: any tap outside a mark, any scroll, or leaving the page hides the tooltip.
+addEventListener('pointerdown', e => { if (!e.target.closest?.('[data-tip]')) hideTip() }, true);
+addEventListener('scroll', () => hideTip(), { passive: true, capture: true });
+addEventListener('blur', () => hideTip());
 
 export async function stats(ctx) {
   const { app, api } = ctx;
@@ -307,13 +311,15 @@ function wireTips(root) {
     if (cross && target.dataset.x) { cross.setAttribute('x1', target.dataset.x); cross.setAttribute('x2', target.dataset.x); cross.setAttribute('visibility', 'visible') }
   };
   const hide = () => { el.hidden = true; root.querySelectorAll('.on-mark').forEach(m => m.classList.remove('on-mark')); root.querySelectorAll('.cross').forEach(c => c.setAttribute('visibility', 'hidden')) };
+  hideTip = hide;
   root.querySelectorAll('[data-tip]').forEach(m => {
-    m.addEventListener('pointermove', e => show(m, e.clientX, e.clientY));
-    m.addEventListener('pointerdown', e => show(m, e.clientX, e.clientY));
+    // Mouse: follow the pointer, hide on leave. Touch: show on tap (not on the
+    // touch that starts a scroll), hide on the next tap elsewhere or a scroll.
+    m.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') show(m, e.clientX, e.clientY) });
     m.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hide() });
-    m.addEventListener('focus', () => { const r = m.getBoundingClientRect(); show(m, r.left + r.width / 2, r.top) });
+    m.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') show(m, e.clientX, e.clientY) });
+    // Keyboard only: a tap or click also focuses the mark, which mustn't pin the tooltip.
+    m.addEventListener('focus', () => { if (m.matches(':focus-visible')) { const r = m.getBoundingClientRect(); show(m, r.left + r.width / 2, r.top) } });
     m.addEventListener('blur', hide);
   });
-  root.addEventListener('scroll', hide, { passive: true });
-  addEventListener('scroll', hide, { passive: true, once: true });
 }
