@@ -1,13 +1,13 @@
-# 🌷 Bloom Cards
+# Bloom
 
-Anki-style spaced repetition, scheduled by **FSRS**, designed to spark joy.
+Spaced repetition that's a pleasure to use. FSRS scheduling, short rounds,
+a variable bonus after each round. Lives at https://cards.reason.place.
 
-- FSRS-5 scheduler with default weights (`fsrs.js`), adjustable retention target
-- Keyboard-first: `space` flip · `1–4` grade (space again = Good)
-- A garden that grows with every review, streaks, combos, confetti
-- Bulk import `front;back` / tab-separated lines (Anki text export works)
-- JSON backup/restore; everything stays in your browser
+- Cards and progress are stored in Cloudflare D1, so they sync across devices.
+- Agents add cards over the API. See [AGENTS.md](AGENTS.md) for the API and
+  the card-writing rules.
+- First visit: choose a key. That key unlocks other devices and is the
+  `BLOOM_KEY` you give agents.
 
-Run locally: `python3 -m http.server -d public`, then open http://localhost:8000 (ES modules need a server).
-
-Deploy: `npx wrangler deploy` (static assets on Cloudflare Workers).
+Develop: `npm i`, `npx wrangler d1 execute cards --local --file migrations/0001_init.sql`, `npm run dev`.
+Deploy: `npm run deploy`, or push to `main` if Workers Builds is connected.

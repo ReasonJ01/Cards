@@ -1,0 +1,95 @@
+:root {
+  --bg: #0b2419;        /* deep racing green */
+  --surface: #12352a;   /* phthalo-leaning panel */
+  --raised: #184536;
+  --line: #ffffff14;
+  --ink: #f2ead8;       /* cream */
+  --muted: #a9b8ad;
+  --brass: #c9a35a;
+  --brass-hi: #e8c987;
+  --again: #b8664f;
+  --good: #6fae86;
+  --r: 22px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 Inter, system-ui, sans-serif; min-height: 100dvh }
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer }
+.serif { font-family: Fraunces, Georgia, serif; font-weight: 400 }
+main { max-width: 520px; margin: auto; padding: 20px 16px calc(110px + var(--safe-b)); min-height: 100dvh; display: flex; flex-direction: column }
+
+/* Home */
+.top { display: flex; align-items: center; gap: 14px; margin: 8px 0 28px }
+.ring { position: relative; width: 58px; height: 58px; flex: none }
+.ring svg { transform: rotate(-90deg) }
+.ring b { position: absolute; inset: 0; display: grid; place-items: center; font: 600 18px Fraunces, serif; color: var(--brass-hi) }
+.top .who { flex: 1 } .top small, .label { color: var(--muted); font-size: 13px; letter-spacing: .02em }
+.streak { font-weight: 600; color: var(--brass-hi) }
+.hero { background: linear-gradient(160deg, var(--raised), var(--surface)); border: 1px solid var(--line); border-radius: 28px; padding: 26px 24px; text-align: left; width: 100%; transition: transform .2s }
+.hero:active, .topic:active { transform: scale(.98) }
+.hero h2 { margin: 0 0 4px; font-size: 30px }
+.hero .go { margin-top: 18px; display: inline-flex; padding: 12px 22px; border-radius: 999px; background: var(--brass); color: var(--bg); font-weight: 600 }
+.label { margin: 30px 4px 10px; text-transform: uppercase; font-size: 12px; letter-spacing: .12em }
+.topic { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 16px 18px; background: var(--surface); border-radius: 18px; margin-bottom: 8px; text-align: left; transition: transform .2s }
+.topic span:last-child { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums }
+.topic .hot { color: var(--brass-hi) }
+.empty { color: var(--muted); text-align: center; margin: 30px 0 }
+
+/* Study */
+.bar { display: flex; align-items: center; gap: 12px; margin-bottom: 18px }
+.bar .x { font-size: 22px; color: var(--muted); padding: 4px 8px }
+.progress { flex: 1; height: 4px; background: var(--line); border-radius: 4px; overflow: hidden }
+.progress i { display: block; height: 100%; background: var(--brass); transition: width .4s cubic-bezier(.2,.8,.2,1) }
+.xp { font-variant-numeric: tabular-nums; color: var(--brass-hi); font-weight: 600; min-width: 56px; text-align: right }
+.combo { text-align: center; height: 20px; font-size: 13px; color: var(--brass-hi); letter-spacing: .08em; opacity: 0; transition: opacity .3s }
+.combo.on { opacity: 1 }
+.card { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 28px; padding: 32px 24px; margin: 8px 0; text-align: center; min-height: 52dvh; position: relative; overflow: hidden }
+.card .t { font-size: 12px; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; position: absolute; top: 18px; left: 0; right: 0 }
+.card .q { font-size: 26px; line-height: 1.3 }
+.card .a { font-size: 21px; color: var(--brass-hi); padding-top: 22px; border-top: 1px solid var(--line); animation: fade .3s }
+.card .tap { color: var(--muted); font-size: 13px; position: absolute; bottom: 18px; left: 0; right: 0 }
+.card.gilded { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass) inset, 0 0 40px #c9a35a22 }
+.card.gilded::after { content: ''; position: absolute; inset: 0; background: linear-gradient(110deg, transparent 40%, #e8c98722 50%, transparent 60%); background-size: 250% 100%; animation: sheen 2.6s infinite; pointer-events: none }
+.card.gilded .t { color: var(--brass-hi) }
+@keyframes sheen { from { background-position: 150% 0 } to { background-position: -100% 0 } }
+.card.enter { animation: in .35s cubic-bezier(.2,.9,.3,1.2) }
+@keyframes in { from { opacity: 0; transform: translateY(14px) scale(.98) } }
+@keyframes fade { from { opacity: 0 } }
+.float { position: fixed; left: 50%; top: 38%; transform: translateX(-50%); font: 600 22px Fraunces, serif; color: var(--brass-hi); pointer-events: none; animation: rise 1s ease-out forwards }
+@keyframes rise { to { opacity: 0; transform: translate(-50%, -60px) } }
+
+/* Thumb zone */
+.dock { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(14px + var(--safe-b)); background: linear-gradient(transparent, var(--bg) 30%) }
+.dock > div { max-width: 520px; margin: auto; display: grid; gap: 8px }
+.grades { grid-template-columns: 1fr 1fr 1.4fr 1fr }
+.grades button { padding: 16px 4px 12px; border-radius: 18px; background: var(--surface); font-weight: 600; transition: transform .12s }
+.grades button:active { transform: scale(.95) }
+.grades small { display: block; font-weight: 400; color: var(--muted); font-size: 12px }
+.grades .g1 { color: #e4a08d } .grades .g3 { background: var(--brass); color: var(--bg) } .grades .g3 small { color: #0b2419aa }
+.fab { position: fixed; right: max(16px, calc(50% - 244px)); bottom: calc(22px + var(--safe-b)); width: 60px; height: 60px; border-radius: 50%; background: var(--brass); color: var(--bg); font-size: 30px; box-shadow: 0 8px 24px #0006 }
+
+/* Round summary */
+.summary { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 6px }
+.summary h2 { font-size: 34px; margin: 0 }
+.stat { display: flex; gap: 28px; margin: 18px 0 }
+.stat b { display: block; font: 600 26px Fraunces, serif; color: var(--brass-hi) }
+.chest { width: 150px; height: 150px; border-radius: 30px; margin: 18px 0 10px; border: 1px solid var(--brass); background: radial-gradient(circle at 50% 35%, #2a5a46, var(--surface)); display: grid; place-items: center; font: 600 34px Fraunces, serif; color: var(--brass-hi); animation: breathe 1.8s ease-in-out infinite }
+.chest.open { animation: pop .5s cubic-bezier(.2,1.6,.4,1) }
+@keyframes breathe { 50% { transform: scale(1.04); box-shadow: 0 0 30px #c9a35a33 } }
+@keyframes pop { from { transform: scale(.6) rotate(-6deg) } }
+.btn { padding: 14px 24px; border-radius: 999px; background: var(--brass); color: var(--bg); font-weight: 600; width: 100% }
+.btn.ghost { background: var(--surface); color: var(--ink) }
+.levelup { color: var(--brass-hi); font: 600 18px Fraunces, serif; animation: fade .6s }
+
+/* Add sheet */
+.sheet { position: fixed; inset: 0; background: #0009; display: flex; align-items: flex-end; z-index: 9; animation: fade .2s }
+.sheet[hidden] { display: none }
+.sheet form { width: 100%; max-width: 520px; margin: auto auto 0; background: var(--surface); border-radius: 26px 26px 0 0; padding: 22px 16px calc(18px + var(--safe-b)); display: grid; gap: 12px; animation: up .3s cubic-bezier(.2,.9,.3,1) }
+@keyframes up { from { transform: translateY(100%) } }
+.chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px }
+.chip { white-space: nowrap; padding: 8px 14px; border-radius: 999px; background: var(--raised); font-size: 14px; color: var(--muted) }
+.chip.on { background: var(--brass); color: var(--bg) }
+input, textarea { width: 100%; font: inherit; font-size: 17px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 14px }
+textarea { resize: none; min-height: 72px }
+input:focus, textarea:focus { outline: none; border-color: var(--brass) }
+.toast { position: fixed; top: calc(16px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); background: var(--raised); border: 1px solid var(--brass); color: var(--brass-hi); padding: 10px 18px; border-radius: 999px; z-index: 10; animation: fade .2s; font-size: 14px }
