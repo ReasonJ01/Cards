@@ -14,8 +14,9 @@ or commit it.
 |---|---|---|
 | GET | `/topics` | Existing topics with card counts. **Call this first.** |
 | GET | `/cards?topic=T&q=text` | List or search cards (topic includes subtopics) |
+| GET | `/cards?flagged=1` | Cards the owner flagged as poorly written |
 | POST | `/cards` | Add cards: `{"cards":[{"topic","q","a","source"}]}` |
-| PATCH | `/cards/:id` | Fix `topic`, `q`, `a` or `source` |
+| PATCH | `/cards/:id` | Fix `topic`, `q`, `a`, `source`, or set `flagged` |
 | DELETE | `/cards/:id` | Remove a card |
 | POST | `/topics/rename` | Move a topic and its subtopics: `{"from","to"}` |
 | GET | `/links` | Prerequisite links between topics |
@@ -45,6 +46,14 @@ duplicates:
 Prerequisite links can ride along in the same JSON as
 `"links":[{"topic","requires"}]`. The paste box also accepts Anki's text
 export: one card per line as `question;answer;topic` (or tab-separated).
+
+### Flagged cards
+
+The owner flags cards that are badly written while reviewing. When asked to
+fix them, fetch `/cards?flagged=1`, rewrite each one by the rules below, and
+`PATCH` it with the new text and `"flagged": false`. Patching keeps the card's
+review history. If one card should become several, patch the first and `POST`
+the rest. Delete cards that aren't worth keeping.
 
 ## Where cards go (topics)
 

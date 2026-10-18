@@ -100,7 +100,8 @@ export default {
 
     if (path === '/api/cards' && M === 'GET') {
       const topic = url.searchParams.get('topic'), q = url.searchParams.get('q');
-      let sql = 'SELECT id, topic, q, a, source, reps, due FROM cards WHERE deleted = 0', args = [];
+      let sql = 'SELECT id, topic, q, a, source, reps, due, flagged FROM cards WHERE deleted = 0', args = [];
+      if (url.searchParams.get('flagged') === '1') sql += ' AND flagged = 1';
       if (topic) { sql += ' AND (topic = ? OR topic LIKE ?)'; args.push(topic, topic + ' › %') }
       if (q) { sql += ' AND (q LIKE ? OR a LIKE ?)'; args.push(`%${q}%`, `%${q}%`) }
       const { results } = await db.prepare(sql + ' ORDER BY topic, created LIMIT 1000').bind(...args).all();
@@ -131,8 +132,10 @@ export default {
     const m = path.match(/^\/api\/cards\/([\w-]+)$/);
     if (m && M === 'PATCH') {
       const fields = ['topic', 'q', 'a', 'source'].filter(k => typeof body?.[k] === 'string');
+      const values = fields.map(k => body[k].trim());
+      if (body && 'flagged' in body) { fields.push('flagged'); values.push(body.flagged ? 1 : 0) }
       if (!fields.length) return json({ error: 'nothing to update' }, 400);
-      const r = await db.prepare(`UPDATE cards SET ${fields.map(k => `${k} = ?`).join(', ')}, updated = ? WHERE id = ? AND deleted = 0`).bind(...fields.map(k => body[k].trim()), Date.now(), m[1]).run();
+      const r = await db.prepare(`UPDATE cards SET ${fields.map(k => `${k} = ?`).join(', ')}, updated = ? WHERE id = ? AND deleted = 0`).bind(...values, Date.now(), m[1]).run();
       return r.meta.changes ? json({ ok: true }) : json({ error: 'not found' }, 404);
     }
     if (m && M === 'DELETE') {

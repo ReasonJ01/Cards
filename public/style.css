@@ -230,3 +230,9 @@ select { width: 100%; font: inherit; font-size: 15px; color: var(--ink); backgro
 .gn .gfoot b { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums }
 .gn.sel { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass) }
 .gn.dim { opacity: .35 }
+
+/* Flagging */
+.bar .flag { color: var(--muted); font-size: 18px; padding: 4px 8px; border-radius: 10px }
+.bar .flag.on { color: #e4a08d; background: #e4a08d22 }
+.flagbar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0 8px }
+.row .fl { color: #e4a08d; font-weight: 400 }

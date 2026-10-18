@@ -64,7 +64,7 @@ async function syncOnce() {
     const r = await api('/sync?since=' + st.since);
     for (const c of r.cards) {
       if (c.deleted) { delete st.cards[c.id]; delete st.reviews[c.id]; continue }
-      st.cards[c.id] = { id: c.id, topic: c.topic, q: c.q, a: c.a, created: c.created };
+      st.cards[c.id] = { id: c.id, topic: c.topic, q: c.q, a: c.a, created: c.created, flagged: c.flagged ? 1 : 0 };
       // Local state wins while a review of this card is still waiting to upload.
       if (c.reps && !st.outbox.some(o => o.id === c.id)) st.reviews[c.id] = { s: c.s, d: c.d, last: c.last, due: c.due, reps: c.reps, lapses: c.lapses };
     }
@@ -225,7 +225,7 @@ function draw() {
   const c = round.card, s = st.reviews[c.id];
   const iv = round.flipped ? preview(s || {}, Date.now()) : [];
   app.innerHTML = `
-    <div class="bar"><button class="x" aria-label="End round">×</button><div class="progress"><i style="width:${round.pct || 0}%"></i></div><div class="xp">${round.shown} xp</div></div>
+    <div class="bar"><button class="x" aria-label="End round">×</button><div class="progress"><i style="width:${round.pct || 0}%"></i></div><button class="flag ${c.flagged ? 'on' : ''}" aria-label="Flag this card as poorly written" aria-pressed="${!!c.flagged}">⚑</button><div class="xp">${round.shown} xp</div></div>
     <div class="combo ${round.combo >= 3 ? 'on' : ''}">COMBO ×${mult().toFixed(1)}</div>
     <div class="card ${round.gilded ? 'gilded' : ''} ${round.flipped ? '' : 'enter'}">
       <div class="t">${round.gilded ? 'Gilded · ×5 xp' : esc(c.topic)}${!s ? ' · new' : s.due > Date.now() ? ` · ahead, due in ${fmt(s.due - Date.now())}` : ''}</div>
@@ -238,6 +238,11 @@ function draw() {
   countUp(app.querySelector('.xp'), round.shown, round.xp, 450, n => n + ' xp');
   round.pct = pct; round.shown = round.xp;
   app.querySelector('.x').onclick = () => round.done ? summary() : goBack();
+  app.querySelector('.flag').onclick = e => {
+    editCard(c, { flagged: c.flagged ? 0 : 1 });
+    e.currentTarget.classList.toggle('on', !!c.flagged); e.currentTarget.setAttribute('aria-pressed', !!c.flagged);
+    toast(c.flagged ? 'Flagged for a rewrite' : 'Unflagged');
+  };
   app.querySelector('.card').onclick = () => { if (!round.flipped) { round.flipped = true; draw() } };
   app.querySelectorAll('[data-g]').forEach(b => b.onclick = () => grade(+b.dataset.g));
 }
@@ -305,22 +310,26 @@ function summary() {
 
 /* ---------- Add ---------- */
 /* ---------- Library ---------- */
-let lib = { q: '', topic: '' }, searchTimer;
+let lib = { q: '', topic: '', flagged: false }, searchTimer;
 const status = c => { const s = st.reviews[c.id]; return !s ? 'new' : s.due <= Date.now() ? 'ready' : 'in ' + fmt(s.due - Date.now()) };
 function library() {
   round = null; view = 'library';
   const q = lib.q.toLowerCase();
   if (lib.topic && !deck.some(c => inTopic(c, lib.topic))) lib.topic = '';
-  const cs = deck.filter(c => inTopic(c, lib.topic) && (!q || (c.q + '\n' + c.a).toLowerCase().includes(q))).sort((a, b) => a.topic.localeCompare(b.topic));
+  const flaggedAll = deck.filter(c => c.flagged);
+  if (lib.flagged && !flaggedAll.length) lib.flagged = false;
+  const cs = deck.filter(c => inTopic(c, lib.topic) && (!lib.flagged || c.flagged) && (!q || (c.q + '\n' + c.a).toLowerCase().includes(q))).sort((a, b) => a.topic.localeCompare(b.topic));
   let html = '', last = null;
   for (const c of cs.slice(0, 400)) {
     if (c.topic !== last) { last = c.topic; html += `<div class="group"><span>${esc(c.topic)}</span><button class="chip" data-rename="${esc(c.topic)}">Rename</button></div>` }
-    html += `<button class="row" data-id="${c.id}"><div><div class="serif">${md(c.q.replace(/\s*\n\s*/g, ' '))}</div><small>${md(c.a.replace(/\s*\n\s*/g, ' '))}</small></div><span>${status(c)}</span></button>`;
+    html += `<button class="row" data-id="${c.id}"><div><div class="serif">${md(c.q.replace(/\s*\n\s*/g, ' '))}</div><small>${md(c.a.replace(/\s*\n\s*/g, ' '))}</small></div><span>${c.flagged ? '<b class="fl">⚑</b> ' : ''}${status(c)}</span></button>`;
   }
   app.innerHTML = `
     <div class="bar"><button class="x" aria-label="Back">←</button><div class="serif" style="flex:1;font-size:22px">Library</div><small style="color:var(--muted)">${cs.length} card${cs.length === 1 ? '' : 's'}</small><button class="chip" id="import">Paste</button></div>
     <input id="search" type="search" placeholder="Search questions and answers" value="${esc(lib.q)}">
-    <div class="chips" style="margin:12px 0 4px"><button class="chip ${lib.topic ? '' : 'on'}" data-f="">All</button>${topics().map(t => `<button class="chip ${t === lib.topic ? 'on' : ''}" data-f="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <div class="chips" style="margin:12px 0 4px"><button class="chip ${lib.topic || lib.flagged ? '' : 'on'}" data-f="">All</button>${flaggedAll.length ? `<button class="chip ${lib.flagged ? 'on' : ''}" id="flagged">⚑ Flagged ${flaggedAll.length}</button>` : ''}${topics().map(t => `<button class="chip ${t === lib.topic ? 'on' : ''}" data-f="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    ${lib.flagged ? `<div class="flagbar"><button class="btn" id="copyflag">Copy for rewrite</button><button class="btn ghost" id="delflag">Delete all</button></div>
+      <p class="sub" style="margin:0 4px 6px">Copy gives an agent these cards and the card-writing rules. Paste its rewrite back in (Paste), then delete the originals here.</p>` : ''}
     <div class="list">${html || '<p class="empty">No cards match.</p>'}</div>
     <button class="fab" aria-label="Add a card">+</button>`;
   app.querySelector('.x').onclick = goBack;
@@ -329,7 +338,16 @@ function library() {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { lib.q = s.value; const pos = s.selectionStart; library(); const n = document.getElementById('search'); n.focus(); n.setSelectionRange(pos, pos) }, 150);
   };
-  app.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { lib.topic = b.dataset.f; library() });
+  app.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { lib.topic = b.dataset.f; lib.flagged = false; library() });
+  document.getElementById('flagged')?.addEventListener('click', () => { lib.flagged = !lib.flagged; lib.topic = ''; library() });
+  document.getElementById('copyflag')?.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(rewritePrompt(cs)); toast(`Copied ${cs.length} card${cs.length === 1 ? '' : 's'} for a rewrite`) } catch { toast('Couldn’t copy') }
+  });
+  const delAll = document.getElementById('delflag');
+  delAll?.addEventListener('click', () => {
+    if (!delAll.dataset.armed) { delAll.dataset.armed = 1; delAll.textContent = `Tap again to delete ${cs.length}`; delAll.style.color = '#e4a08d'; return }
+    cs.forEach(deleteCard); toast(`Deleted ${cs.length} card${cs.length === 1 ? '' : 's'}`); library();
+  });
   app.querySelectorAll('[data-id]').forEach(b => b.onclick = () => openEditor(st.cards[b.dataset.id]));
   app.querySelectorAll('[data-rename]').forEach(b => b.onclick = () => renameTopic(b.dataset.rename));
   app.querySelector('.fab').onclick = () => openEditor();
@@ -380,7 +398,9 @@ function renameTopic(from) {
 function editCard(card, fields) {
   Object.assign(card, fields);
   const queued = st.pending.find(p => p.id === card.id);
-  if (queued) Object.assign(queued, fields); else st.ops.push({ kind: 'patch', id: card.id, body: fields });
+  // Queued cards upload first; fields the insert ignores (like flagged) follow as a patch.
+  if (queued) Object.assign(queued, fields);
+  if (!queued || 'flagged' in fields) st.ops.push({ kind: 'patch', id: card.id, body: fields });
   save(); merge(); sync();
 }
 function deleteCard(card) {
@@ -402,6 +422,25 @@ const EXAMPLE = `{"cards":[{"topic":"Languages › Spanish","q":"Spanish → Eng
 
 or Anki text, one card per line:
 quedarse;to stay, to remain;Languages › Spanish`;
+
+// Flagged cards plus the rules, for an agent to rewrite into pasteable JSON.
+function rewritePrompt(cards) {
+  return `These flashcards from my spaced-repetition app were flagged as poorly written. Rewrite them.
+
+Rules (from Woźniak's "Twenty Rules of Formulating Knowledge"):
+- One fact per card. Answers are a word, a phrase or one short sentence; split a card that tests several things.
+- No lists or sets ("name the 5 …"): one card per item instead.
+- Ask precisely so there is exactly one right answer; add context like "In Rust, …".
+- Keep wording short. Keep each card's topic unless it's clearly wrong.
+- If a card is fine as it is, keep it unchanged; if it's not worth keeping, leave it out.
+- **bold**, *italic* and \`code\` render; otherwise plain text.
+
+Reply with only this JSON in a code block, nothing else:
+{"cards":[{"topic":"…","q":"…","a":"…"}]}
+
+The flagged cards:
+${JSON.stringify(cards.map(c => ({ topic: c.topic, q: c.q, a: c.a })), null, 1)}`;
+}
 
 function agentPrompt() {
   const ts = topics();
@@ -493,13 +532,14 @@ function openEditor(card) {
       <textarea name="q" placeholder="Question" required>${card ? esc(card.q) : ''}</textarea>
       <textarea name="a" placeholder="Answer" required>${card ? esc(card.a) : ''}</textarea>
       <button class="btn">${card ? 'Save' : 'Add card'}</button>
-      ${card ? `<small style="color:var(--muted);text-align:center">${status(card) === 'new' ? 'Not studied yet' : `Reviewed ${st.reviews[card.id].reps}× · next ${status(card)}`}</small><button type="button" class="btn ghost" data-del>Delete card</button>` : ''}
+      ${card ? `<small style="color:var(--muted);text-align:center">${status(card) === 'new' ? 'Not studied yet' : `Reviewed ${st.reviews[card.id].reps}× · next ${status(card)}`}</small><button type="button" class="btn ghost" data-flag>${card.flagged ? 'Unflag' : '⚑ Flag for rewrite'}</button><button type="button" class="btn ghost" data-del>Delete card</button>` : ''}
     </form>`;
     const f = sheet.querySelector('form');
     // Keep what's typed when switching topic chips.
     sheet.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { const q = f.q.value, a = f.a.value; topic = b.dataset.t; paint(); f2().q.value = q; f2().a.value = a });
     // The sheet is already open, so the import sheet replaces it in the same history entry.
     sheet.querySelector('[data-paste]')?.addEventListener('click', openImport);
+    sheet.querySelector('[data-flag]')?.addEventListener('click', e => { editCard(card, { flagged: card.flagged ? 0 : 1 }); e.currentTarget.textContent = card.flagged ? 'Unflag' : '⚑ Flag for rewrite'; toast(card.flagged ? 'Flagged' : 'Unflagged') });
     const del = sheet.querySelector('[data-del]');
     if (del) del.onclick = () => {
       if (!del.dataset.armed) { del.dataset.armed = 1; del.textContent = 'Tap again to delete'; del.style.color = '#e4a08d'; return }
