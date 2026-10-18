@@ -293,12 +293,13 @@ function library() {
   document.getElementById('import').onclick = openImport;
 }
 const refresh = () => view === 'library' ? library() : view === 'stats' ? showStats() : view === 'map' ? showMap() : home();
+function addLink(topic, requires) { st.links.push({ topic, requires }); st.ops.push({ kind: 'link', topic, requires }) }
 function showMap() {
   round = null; view = 'map';
   map({
     app, sheet, goBack, openSheet, inTopic, topics,
     cards: () => deck, states: () => st.reviews, links: () => st.links,
-    link: (topic, requires) => { st.links.push({ topic, requires }); st.ops.push({ kind: 'link', topic, requires }); save(); sync() },
+    link: (topic, requires) => { addLink(topic, requires); save(); sync() },
     unlink: (topic, requires) => { st.links = st.links.filter(l => !(l.topic === topic && l.requires === requires)); st.ops.push({ kind: 'unlink', topic, requires }); save(); sync() },
     study: topic => { sheet.hidden = true; start(topic) },
   });
@@ -354,12 +355,10 @@ function queueCard({ topic, q, a, source }) {
 }
 
 /* ---------- Paste import ---------- */
-const EXAMPLE = `# Languages › Spanish
-Q: Spanish → English: *quedarse*
-A: to stay, to remain
+const EXAMPLE = `{"cards":[{"topic":"Languages › Spanish","q":"Spanish → English: *quedarse*","a":"to stay, to remain"}]}
 
-Q: English → Spanish: to stay
-A: quedarse`;
+or Anki text, one card per line:
+quedarse;to stay, to remain;Languages › Spanish`;
 
 function agentPrompt() {
   const ts = topics();
@@ -376,8 +375,12 @@ Rules (from Woźniak's "Twenty Rules of Formulating Knowledge"):
 Topics are paths, most general first, joined with " › ", in Title Case, 2–3 levels deep.
 ${ts.length ? `Reuse one of my existing topics where it fits:\n${ts.map(t => '- ' + t).join('\n')}` : 'I have no topics yet, so choose sensible ones.'}
 
-Reply with only this JSON in a code block, nothing else:
-{"cards":[{"topic":"Languages › Spanish","q":"Spanish → English: *quedarse*","a":"to stay, to remain","source":"where it came from, or null"}]}`;
+Optionally, add prerequisite links between topics: "topic" builds on "requires". They're drawn on my knowledge map and never affect scheduling. Only add direct, real dependencies, and don't link a topic to its own parent.
+${st.links.length ? `Links I already have:\n${st.links.map(l => `- ${l.topic} requires ${l.requires}`).join('\n')}` : ''}
+
+Reply with only this JSON in a code block, nothing else ("links" may be omitted):
+{"cards":[{"topic":"Computing › Rust › Lifetimes","q":"In Rust, what does 'a denote in a function signature?","a":"A lifetime parameter","source":"where it came from, or null"}],
+ "links":[{"topic":"Computing › Rust › Lifetimes","requires":"Computing › Rust › Ownership"}]}`;
 }
 
 function openImport() {
@@ -385,7 +388,7 @@ function openImport() {
   sheet.innerHTML = `<form class="import">
     <div style="display:flex;justify-content:space-between;align-items:center"><span class="serif" style="font-size:20px">Paste cards</span><button type="button" class="chip" data-close>Cancel</button></div>
     <textarea name="t" rows="8" placeholder="${esc(EXAMPLE)}" spellcheck="false"></textarea>
-    <small style="color:var(--muted)">JSON from an agent, Q:/A: blocks under # Topic headings, or one card per line as question ; answer ; topic. <button type="button" class="link" id="copy" style="color:var(--brass-hi)">Copy agent prompt</button></small>
+    <small style="color:var(--muted)">JSON from an agent, or Anki text export: one card per line as question ; answer ; topic (tabs work too). <button type="button" class="link" id="copy" style="color:var(--brass-hi)">Copy agent prompt</button></small>
     <div id="pv"></div>
     <button class="btn" id="go" disabled>Add cards</button>
   </form>`;
@@ -396,7 +399,9 @@ function openImport() {
       const card = { ...c, topic: c.topic || normTopic(def) || 'Inbox' }, k = card.topic + '\n' + normQ(card.q);
       (seen.has(k) ? dups : fresh).push(card); seen.add(k);
     }
-    return { fresh, dups, errors: r.errors, needsTopic: r.cards.some(c => !c.topic) };
+    const have = new Set(st.links.map(l => l.topic + '\n' + l.requires));
+    const links = (r.links || []).filter(l => { const k = l.topic + '\n' + l.requires; return !have.has(k) && (have.add(k), true) });
+    return { fresh, dups, links, errors: r.errors, needsTopic: r.cards.some(c => !c.topic) };
   };
   const preview = () => {
     const p = parse(), groups = new Map();
@@ -404,21 +409,24 @@ function openImport() {
     pv.innerHTML = !f.t.value.trim() ? '' : `
       ${p.needsTopic ? `<div class="label0" style="margin:6px 0">Cards without a topic go to</div><div class="chips">${[...new Set([def, ...topics()])].map(t => `<button type="button" class="chip ${t === def ? 'on' : ''}" data-def="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
       <div class="pv">${[...groups].map(([t, n]) => `<div><span>${esc(t)}</span><b>${n}</b></div>`).join('')}
+      ${p.links.length ? `<div><span>Prerequisite links</span><b>${p.links.length}</b></div>` : ''}
       ${p.dups.length ? `<div class="muted"><span>Already in your deck, skipped</span><b>${p.dups.length}</b></div>` : ''}
       ${p.errors.length ? `<div class="warn"><span>${p.errors.slice(0, 4).map(esc).join('<br>')}${p.errors.length > 4 ? `<br>and ${p.errors.length - 4} more` : ''}</span><b>${p.errors.length}</b></div>` : ''}</div>`;
     pv.querySelectorAll('[data-def]').forEach(b => b.onclick = () => { def = b.dataset.def; preview() });
-    go.disabled = !p.fresh.length;
-    go.textContent = p.fresh.length ? `Add ${p.fresh.length} card${p.fresh.length === 1 ? '' : 's'}` : 'Add cards';
+    const parts = [p.fresh.length && `${p.fresh.length} card${p.fresh.length === 1 ? '' : 's'}`, p.links.length && `${p.links.length} link${p.links.length === 1 ? '' : 's'}`].filter(Boolean);
+    go.disabled = !parts.length;
+    go.textContent = parts.length ? 'Add ' + parts.join(' and ') : 'Add cards';
   };
   f.t.oninput = () => { clearTimeout(timer); timer = setTimeout(preview, 200) };
   sheet.querySelector('#copy').onclick = async () => { try { await navigator.clipboard.writeText(agentPrompt()); toast('Prompt copied') } catch { toast('Couldn’t copy') } };
   f.onsubmit = e => {
     e.preventDefault();
-    const { fresh } = parse();
-    if (!fresh.length) return;
+    const { fresh, links } = parse();
+    if (!fresh.length && !links.length) return;
     fresh.forEach(c => queueCard({ ...c, source: c.source || 'paste' }));
+    links.forEach(l => addLink(l.topic, l.requires));
     save(); merge(); sync();
-    toast(`Added ${fresh.length} card${fresh.length === 1 ? '' : 's'}`);
+    toast(go.textContent.replace('Add', 'Added'));
     goBack();
   };
   openSheet(); f.t.focus();

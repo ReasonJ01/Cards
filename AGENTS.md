@@ -42,8 +42,9 @@ duplicates:
 {"cards":[{"topic":"Languages › Spanish › Verbs","q":"Spanish → English: *quedarse*","a":"to stay, to remain","source":"Duolingo unit 4"}]}
 ```
 
-The paste box also accepts `Q:`/`A:` blocks under `# Topic` headings, and one
-card per line as `question ; answer ; topic` (or tab-separated).
+Prerequisite links can ride along in the same JSON as
+`"links":[{"topic","requires"}]`. The paste box also accepts Anki's text
+export: one card per line as `question;answer;topic` (or tab-separated).
 
 ## Where cards go (topics)
 
