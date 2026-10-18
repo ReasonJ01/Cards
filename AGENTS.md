@@ -74,6 +74,6 @@ it plain otherwise.
 ## Code layout
 
 - `public/`: the app (static, mobile-first). `fsrs.js` is the scheduler,
-  `app.js` the UI.
+  `app.js` the UI, `stats.js` the statistics page.
 - `src/worker.js`: the API and asset serving (a Cloudflare Worker).
 - `migrations/`: the D1 schema. Deployed with `npx wrangler deploy`.

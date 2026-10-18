@@ -50,6 +50,11 @@ export default {
       return json({ ok: true, count: list.length });
     }
 
+    // Full review log for the stats page, compact: [card_id, ts, grade].
+    if (path === '/api/history' && M === 'GET') {
+      return json(await db.prepare('SELECT card_id, ts, grade FROM reviews ORDER BY ts').raw());
+    }
+
     if (path === '/api/topics' && M === 'GET') {
       const { results } = await db.prepare('SELECT topic, COUNT(*) AS count FROM cards WHERE deleted = 0 GROUP BY topic ORDER BY topic').all();
       return json(results);

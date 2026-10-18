@@ -1,4 +1,5 @@
 import { review, preview } from './fsrs.js';
+import { stats } from './stats.js';
 
 const KEY = 'bloom-v2', ROUND = 10, NEW_PER_DAY = 15, GILD_CHANCE = 1 / 12;
 const XP = { 1: 4, 2: 8, 3: 10, 4: 12 };
@@ -60,7 +61,7 @@ async function syncOnce() {
     const r = await api('/sync?since=' + st.since);
     for (const c of r.cards) {
       if (c.deleted) { delete st.cards[c.id]; delete st.reviews[c.id]; continue }
-      st.cards[c.id] = { id: c.id, topic: c.topic, q: c.q, a: c.a };
+      st.cards[c.id] = { id: c.id, topic: c.topic, q: c.q, a: c.a, created: c.created };
       // Local state wins while a review of this card is still waiting to upload.
       if (c.reps && !st.outbox.some(o => o.id === c.id)) st.reviews[c.id] = { s: c.s, d: c.d, last: c.last, due: c.due, reps: c.reps, lapses: c.lapses };
     }
@@ -120,13 +121,13 @@ function goBack() {
   if (history.state?.depth) return history.back();
   sheet.hidden = true; nav({ v: 'home' }, true); home();
 }
-const openSheet = () => { if (sheet.hidden) nav({ v: view === 'library' ? 'library' : 'home', sheet: true }); sheet.hidden = false };
+const openSheet = () => { if (sheet.hidden) nav({ v: view, sheet: true }); sheet.hidden = false };
 addEventListener('popstate', e => {
   const s = e.state || { v: 'home' };
   sheet.hidden = true;
   // A closed sheet or a finished round can't be resumed by going forward: step back off it.
   if (s.sheet || s.v === 'study' || s.v === 'summary') return history.back();
-  if (s.v === 'library') library(); else home();
+  if (s.v === 'library') library(); else if (s.v === 'stats') showStats(); else home();
 });
 function home() {
   round = null; view = 'home';
@@ -144,9 +145,10 @@ function home() {
     ${all.total ? `<button class="hero" data-t=""><div class="label" style="margin:0 0 8px">Everything</div><h2 class="serif">${all.total} ready</h2><small class="label" style="text-transform:none;letter-spacing:0;font-size:14px">A round is ${Math.min(ROUND, all.total)} card${Math.min(ROUND, all.total) > 1 ? 's' : ''}. Stop whenever.</small><div><span class="go">Play a round</span></div></button>`
       : `<div class="hero"><h2 class="serif">All caught up</h2><small style="color:var(--muted)">${deck.length ? 'Nothing is ready. Add something new, or come back later.' : 'No cards yet — tap + to add your first.'}</small></div>`}
     ${rows ? `<div class="label">Focus on a topic</div>${rows}` : ''}
-    ${deck.length ? `<button class="topic" id="lib" style="margin-top:22px;justify-content:center;color:var(--muted)">Manage cards</button>` : ''}
+    ${deck.length ? `<div class="links"><button class="topic" id="lib">Manage cards</button><button class="topic" id="stats">Statistics</button></div>` : ''}
     <button class="fab" aria-label="Add a card">+</button>`;
   document.getElementById('lib')?.addEventListener('click', () => { nav({ v: 'library' }); library() });
+  document.getElementById('stats')?.addEventListener('click', () => { nav({ v: 'stats' }); showStats() });
   requestAnimationFrame(() => requestAnimationFrame(() => { const ring = document.getElementById('ring'); if (ring) ring.style.strokeDashoffset = C * (1 - p) }));
   countUp(document.getElementById('lvxp'), from - levelStart(L), st.xp - levelStart(L), 800);
   app.querySelectorAll('[data-t]').forEach(b => b.onclick = () => start(b.dataset.t));
@@ -284,7 +286,11 @@ function library() {
   app.querySelectorAll('[data-rename]').forEach(b => b.onclick = () => renameTopic(b.dataset.rename));
   app.querySelector('.fab').onclick = () => openEditor();
 }
-const refresh = () => view === 'library' ? library() : home();
+const refresh = () => view === 'library' ? library() : view === 'stats' ? showStats() : home();
+function showStats() {
+  round = null; view = 'stats';
+  stats({ app, api, goBack, openEditor, inTopic, topics, view: () => view, cards: () => deck, states: () => st.reviews, outbox: () => st.outbox, cardById: id => st.cards[id] });
+}
 
 function renameTopic(from) {
   sheet.innerHTML = `<form>
@@ -385,6 +391,8 @@ document.addEventListener('keydown', e => {
   if (!round.flipped && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); round.flipped = true; draw() }
   else if (round.flipped && '1234'.includes(e.key)) grade(+e.key);
 });
+// Older caches lack creation dates; refetch everything once to fill them in.
+if (Object.values(st.cards).some(c => c.created == null)) st.since = 0;
 merge();
 history.replaceState({ v: 'home', depth: 0 }, '', location.pathname);
 if (!apiKey) gate();

@@ -117,3 +117,49 @@ input[type=search] { -webkit-appearance: none }
 .row small { display: block; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px }
 .row > span { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 3px }
 .row:active { background: var(--raised) }
+
+/* Links under home */
+.links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 22px }
+.links .topic { justify-content: center; color: var(--muted); margin: 0 }
+
+/* Statistics */
+.filters { display: grid; gap: 8px; margin-bottom: 14px }
+.panel { background: var(--surface); border-radius: 22px; padding: 18px; margin-bottom: 12px; overflow: hidden }
+.panel h3 { margin: 0; font: 600 15px Inter, sans-serif }
+.sub { color: var(--muted); font-size: 13px; margin-top: 2px }
+.label0 { color: var(--muted); font-size: 12px; letter-spacing: .1em; text-transform: uppercase }
+.hero-stat .hero-num { font: 600 56px/1.05 Inter, sans-serif; margin: 6px 0 2px; letter-spacing: -.02em }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px }
+.tiles.four { grid-template-columns: repeat(2, 1fr); margin: 0 0 12px }
+.tile { background: var(--bg); border-radius: 16px; padding: 12px }
+.tiles.four .tile { background: var(--surface) }
+.tile .label0 { font-size: 11px; letter-spacing: .06em }
+.tile-num { font: 600 24px Inter, sans-serif; margin-top: 4px }
+.tile-num small { font-size: 14px; color: var(--muted); font-weight: 500 }
+.tile .sub { font-size: 12px }
+@media (max-width: 400px) { .tiles { grid-template-columns: 1fr 1fr } .tiles .tile:last-child:nth-child(3) { grid-column: span 2 } }
+.chart { display: block; margin-top: 14px; overflow: visible }
+.chart .tick { fill: var(--muted); font: 11px Inter, sans-serif; font-variant-numeric: tabular-nums }
+.chart .tick.strong { fill: var(--ink); font-size: 13px }
+.chart .hit { fill: transparent; outline: none }
+.chart .hit.on-mark { fill: #ffffff0a }
+.chart .cell { outline: none } .chart .cell.on-mark { stroke: var(--ink); stroke-width: 1.5 }
+.scroll { overflow-x: auto; scrollbar-width: none }
+.legend { display: flex; align-items: center; gap: 4px; justify-content: flex-end; color: var(--muted); font-size: 11px; margin-top: 8px }
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px }
+.legend span { margin: 0 4px }
+.legend.wide { justify-content: flex-start; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin-top: 12px }
+.legend.wide span { display: inline-flex; align-items: center; gap: 6px; margin: 0 }
+.legend b { color: var(--ink); font-weight: 600 }
+details { margin-top: 10px; font-size: 13px }
+summary { color: var(--muted); cursor: pointer; list-style: none } summary::-webkit-details-marker { display: none }
+summary::before { content: '▸ '; } details[open] summary::before { content: '▾ ' }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; font-variant-numeric: tabular-nums }
+th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 4px; border-bottom: 1px solid var(--line) }
+td { padding: 7px 4px; border-bottom: 1px solid var(--line) }
+th:not(:first-child), td:not(:first-child) { text-align: right }
+details table { max-height: 240px }
+.tablewrap { overflow-x: auto; margin-top: 6px }
+.link { color: var(--ink); text-align: left; padding: 0; font-size: 13px }
+.tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 500; padding: 7px 11px; border-radius: 10px; max-width: 260px; box-shadow: 0 6px 20px #0006 }
+.panel .row { background: var(--bg) }
