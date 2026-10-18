@@ -1,5 +1,6 @@
 import { review, preview } from './fsrs.js';
 import { stats } from './stats.js';
+import { parsePaste, normTopic, normQ } from './paste.js';
 
 const KEY = 'bloom-v2', ROUND = 10, NEW_PER_DAY = 15, GILD_CHANCE = 1 / 12;
 const XP = { 1: 4, 2: 8, 3: 10, 4: 12 };
@@ -23,7 +24,6 @@ const statsOf = () => Object.fromEntries(STATS.map(k => [k, st[k]]));
 // Writes are optimistic: they land in local state at once and queue here.
 // sync() drains the queues in order (new cards before reviews of them) and
 // retries with capped exponential backoff and full jitter until it succeeds.
-const normTopic = t => t.trim().split(/\s*(?:›|>|::|\/)\s*/).filter(Boolean).join(' › ');
 let syncing = null, again = false, attempt = 0, retryTimer;
 function sync() {
   if (syncing) { again = true; return syncing }
@@ -270,7 +270,7 @@ function library() {
     html += `<button class="row" data-id="${c.id}"><div><div class="serif">${md(c.q)}</div><small>${md(c.a)}</small></div><span>${status(c)}</span></button>`;
   }
   app.innerHTML = `
-    <div class="bar"><button class="x" aria-label="Back">←</button><div class="serif" style="flex:1;font-size:22px">Library</div><small style="color:var(--muted)">${cs.length} card${cs.length === 1 ? '' : 's'}</small></div>
+    <div class="bar"><button class="x" aria-label="Back">←</button><div class="serif" style="flex:1;font-size:22px">Library</div><small style="color:var(--muted)">${cs.length} card${cs.length === 1 ? '' : 's'}</small><button class="chip" id="import">Paste</button></div>
     <input id="search" type="search" placeholder="Search questions and answers" value="${esc(lib.q)}">
     <div class="chips" style="margin:12px 0 4px"><button class="chip ${lib.topic ? '' : 'on'}" data-f="">All</button>${topics().map(t => `<button class="chip ${t === lib.topic ? 'on' : ''}" data-f="${esc(t)}">${esc(t)}</button>`).join('')}</div>
     <div class="list">${html || '<p class="empty">No cards match.</p>'}</div>
@@ -285,6 +285,7 @@ function library() {
   app.querySelectorAll('[data-id]').forEach(b => b.onclick = () => openEditor(st.cards[b.dataset.id]));
   app.querySelectorAll('[data-rename]').forEach(b => b.onclick = () => renameTopic(b.dataset.rename));
   app.querySelector('.fab').onclick = () => openEditor();
+  document.getElementById('import').onclick = openImport;
 }
 const refresh = () => view === 'library' ? library() : view === 'stats' ? showStats() : home();
 function showStats() {
@@ -329,12 +330,90 @@ function deleteCard(card) {
   save(); merge(); sync();
 }
 
+// New cards show at once and upload in the background (see sync).
+function queueCard({ topic, q, a, source }) {
+  const card = { id: crypto.randomUUID().replace(/-/g, '').slice(0, 16), topic, q, a, created: Date.now() };
+  st.cards[card.id] = card; st.pending.push({ ...card, source });
+}
+
+/* ---------- Paste import ---------- */
+const EXAMPLE = `# Languages › Spanish
+Q: Spanish → English: *quedarse*
+A: to stay, to remain
+
+Q: English → Spanish: to stay
+A: quedarse`;
+
+function agentPrompt() {
+  const ts = topics();
+  return `Write flashcards for me to paste into my spaced-repetition app.
+
+Rules (from Woźniak's "Twenty Rules of Formulating Knowledge"):
+- One fact per card. Answers are a word, a phrase or one short sentence; split anything with "and".
+- No lists or sets ("name the 5 …"): one card per item instead.
+- Ask precisely so there is exactly one right answer; add context like "In Rust, …".
+- Make cards both ways when both directions matter (word → meaning and meaning → word).
+- Keep wording short. Only cover what I've learned or asked about; don't pad.
+- **bold**, *italic* and \`code\` render; otherwise plain text.
+
+Topics are paths, most general first, joined with " › ", in Title Case, 2–3 levels deep.
+${ts.length ? `Reuse one of my existing topics where it fits:\n${ts.map(t => '- ' + t).join('\n')}` : 'I have no topics yet, so choose sensible ones.'}
+
+Reply with only this JSON in a code block, nothing else:
+{"cards":[{"topic":"Languages › Spanish","q":"Spanish → English: *quedarse*","a":"to stay, to remain","source":"where it came from, or null"}]}`;
+}
+
+function openImport() {
+  let def = lib.topic || localStorage.getItem('bloom-topic') || topics()[0] || 'Inbox', timer;
+  sheet.innerHTML = `<form class="import">
+    <div style="display:flex;justify-content:space-between;align-items:center"><span class="serif" style="font-size:20px">Paste cards</span><button type="button" class="chip" data-close>Cancel</button></div>
+    <textarea name="t" rows="8" placeholder="${esc(EXAMPLE)}" spellcheck="false"></textarea>
+    <small style="color:var(--muted)">JSON from an agent, Q:/A: blocks under # Topic headings, or one card per line as question ; answer ; topic. <button type="button" class="link" id="copy" style="color:var(--brass-hi)">Copy agent prompt</button></small>
+    <div id="pv"></div>
+    <button class="btn" id="go" disabled>Add cards</button>
+  </form>`;
+  const f = sheet.querySelector('form'), pv = sheet.querySelector('#pv'), go = sheet.querySelector('#go');
+  const parse = () => {
+    const r = parsePaste(f.t.value), seen = new Set(deck.map(c => c.topic + '\n' + normQ(c.q))), fresh = [], dups = [];
+    for (const c of r.cards) {
+      const card = { ...c, topic: c.topic || normTopic(def) || 'Inbox' }, k = card.topic + '\n' + normQ(card.q);
+      (seen.has(k) ? dups : fresh).push(card); seen.add(k);
+    }
+    return { fresh, dups, errors: r.errors, needsTopic: r.cards.some(c => !c.topic) };
+  };
+  const preview = () => {
+    const p = parse(), groups = new Map();
+    for (const c of p.fresh) groups.set(c.topic, (groups.get(c.topic) || 0) + 1);
+    pv.innerHTML = !f.t.value.trim() ? '' : `
+      ${p.needsTopic ? `<div class="label0" style="margin:6px 0">Cards without a topic go to</div><div class="chips">${[...new Set([def, ...topics()])].map(t => `<button type="button" class="chip ${t === def ? 'on' : ''}" data-def="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : ''}
+      <div class="pv">${[...groups].map(([t, n]) => `<div><span>${esc(t)}</span><b>${n}</b></div>`).join('')}
+      ${p.dups.length ? `<div class="muted"><span>Already in your deck, skipped</span><b>${p.dups.length}</b></div>` : ''}
+      ${p.errors.length ? `<div class="warn"><span>${p.errors.slice(0, 4).map(esc).join('<br>')}${p.errors.length > 4 ? `<br>and ${p.errors.length - 4} more` : ''}</span><b>${p.errors.length}</b></div>` : ''}</div>`;
+    pv.querySelectorAll('[data-def]').forEach(b => b.onclick = () => { def = b.dataset.def; preview() });
+    go.disabled = !p.fresh.length;
+    go.textContent = p.fresh.length ? `Add ${p.fresh.length} card${p.fresh.length === 1 ? '' : 's'}` : 'Add cards';
+  };
+  f.t.oninput = () => { clearTimeout(timer); timer = setTimeout(preview, 200) };
+  sheet.querySelector('#copy').onclick = async () => { try { await navigator.clipboard.writeText(agentPrompt()); toast('Prompt copied') } catch { toast('Couldn’t copy') } };
+  f.onsubmit = e => {
+    e.preventDefault();
+    const { fresh } = parse();
+    if (!fresh.length) return;
+    fresh.forEach(c => queueCard({ ...c, source: c.source || 'paste' }));
+    save(); merge(); sync();
+    toast(`Added ${fresh.length} card${fresh.length === 1 ? '' : 's'}`);
+    goBack();
+  };
+  openSheet(); f.t.focus();
+  sheet.onclick = e => { if (e.target === sheet || e.target.dataset.close != null) goBack() };
+}
+
 // One sheet for adding (no card) and editing (a card).
 function openEditor(card) {
   let topic = card?.topic || localStorage.getItem('bloom-topic') || topics()[0] || '';
   const paint = () => {
     sheet.innerHTML = `<form>
-      <div style="display:flex;justify-content:space-between;align-items:center"><span class="serif" style="font-size:20px">${card ? 'Edit card' : 'New card'}</span><button type="button" class="chip" data-close>${card ? 'Cancel' : 'Done'}</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center"><span class="serif" style="font-size:20px">${card ? 'Edit card' : 'New card'}</span><span>${card ? '' : '<button type="button" class="chip" data-paste>Paste many</button> '}<button type="button" class="chip" data-close>${card ? 'Cancel' : 'Done'}</button></span></div>
       <div class="chips">${[...new Set([topic, ...topics()].filter(Boolean))].map(t => `<button type="button" class="chip ${t === topic ? 'on' : ''}" data-t="${esc(t)}">${esc(t)}</button>`).join('')}<button type="button" class="chip" data-new>+ topic</button></div>
       <input name="topic" placeholder="New topic" ${topic ? 'hidden' : ''} value="${esc(topic)}">
       <textarea name="q" placeholder="Question" required>${card ? esc(card.q) : ''}</textarea>
@@ -345,6 +424,8 @@ function openEditor(card) {
     const f = sheet.querySelector('form');
     // Keep what's typed when switching topic chips.
     sheet.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { const q = f.q.value, a = f.a.value; topic = b.dataset.t; paint(); f2().q.value = q; f2().a.value = a });
+    // The sheet is already open, so the import sheet replaces it in the same history entry.
+    sheet.querySelector('[data-paste]')?.addEventListener('click', openImport);
     const del = sheet.querySelector('[data-del]');
     if (del) del.onclick = () => {
       if (!del.dataset.armed) { del.dataset.armed = 1; del.textContent = 'Tap again to delete'; del.style.color = '#e4a08d'; return }
@@ -358,8 +439,7 @@ function openEditor(card) {
         editCard(card, { topic, q: f.q.value.trim(), a: f.a.value.trim() });
         toast('Saved'); return goBack();
       }
-      const added = { id: crypto.randomUUID().replace(/-/g, '').slice(0, 16), topic, q: f.q.value.trim(), a: f.a.value.trim() };
-      st.cards[added.id] = added; st.pending.push({ ...added, source: 'app' });
+      queueCard({ topic, q: f.q.value.trim(), a: f.a.value.trim(), source: 'app' });
       save(); merge(); localStorage.setItem('bloom-topic', topic);
       refresh(); toast(`Added to ${topic}`); paint(); sync();
     };

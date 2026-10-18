@@ -29,6 +29,20 @@ curl -s https://cards.reason.place/api/cards \
   -d '{"cards":[{"topic":"Languages › Spanish › Verbs","q":"Spanish → English: *quedarse*","a":"to stay, to remain","source":"Duolingo unit 4"}]}'
 ```
 
+### No API access? Output JSON to paste
+
+If you can't make HTTP requests or don't have `BLOOM_KEY`, reply with the
+same JSON you would have POSTed, in a code block, and nothing else. The owner
+pastes it into the app (Library → Paste), which previews it and skips
+duplicates:
+
+```json
+{"cards":[{"topic":"Languages › Spanish › Verbs","q":"Spanish → English: *quedarse*","a":"to stay, to remain","source":"Duolingo unit 4"}]}
+```
+
+The paste box also accepts `Q:`/`A:` blocks under `# Topic` headings, and one
+card per line as `question ; answer ; topic` (or tab-separated).
+
 ## Where cards go (topics)
 
 - A topic is a path, most general first, joined with ` › `. For example
