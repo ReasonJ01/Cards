@@ -6,7 +6,7 @@ const app = document.getElementById('app'), sheet = document.getElementById('she
 
 let st;
 try { st = JSON.parse(localStorage.getItem(KEY)) } catch {}
-st = { cards: {}, reviews: {}, outbox: [], pending: [], since: 0, xp: 0, streak: 0, lastDay: null, newDay: null, newCount: 0, ...st };
+st = { cards: {}, reviews: {}, outbox: [], pending: [], ops: [], since: 0, xp: 0, streak: 0, lastDay: null, newDay: null, newCount: 0, ...st };
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)) } catch {} };
 
 /* ---------- Server ---------- */
@@ -14,7 +14,7 @@ let apiKey = localStorage.getItem('bloom-key');
 async function api(path, opts = {}) {
   const res = await fetch('/api' + path, { ...opts, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + apiKey }, body: opts.body && JSON.stringify(opts.body) });
   if (res.status === 401) { localStorage.removeItem('bloom-key'); apiKey = null; gate(); throw new Error('unauthorized') }
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
+  if (!res.ok) throw Object.assign(new Error((await res.json().catch(() => ({}))).error || res.status), { status: res.status });
   return res.json();
 }
 const STATS = ['xp', 'streak', 'lastDay', 'newDay', 'newCount'];
@@ -45,6 +45,16 @@ async function syncOnce() {
         toast(s.reason === 'duplicate question in this topic' ? 'You already had that card' : 'A card couldn’t be saved: ' + s.reason);
       }
       st.pending = st.pending.slice(out.length); save();
+    }
+    // Edits, deletes and topic renames, in the order they were made.
+    while (st.ops.length) {
+      const o = st.ops[0];
+      try {
+        if (o.kind === 'patch') await api('/cards/' + o.id, { method: 'PATCH', body: o.body });
+        else if (o.kind === 'delete') await api('/cards/' + o.id, { method: 'DELETE' });
+        else if (o.kind === 'rename') await api('/topics/rename', { method: 'POST', body: { from: o.from, to: o.to } });
+      } catch (e) { if (e.status !== 404) throw e }
+      st.ops.shift(); save();
     }
     if (st.outbox.length) { const out = st.outbox.slice(); await api('/reviews', { method: 'POST', body: out }); st.outbox = st.outbox.slice(out.length) }
     const r = await api('/sync?since=' + st.since);
@@ -98,8 +108,9 @@ function toast(t) { document.querySelector('.toast')?.remove(); const e = Object
 function float(t) { const e = Object.assign(document.createElement('div'), { className: 'float', textContent: t }); document.body.append(e); setTimeout(() => e.remove(), 1000) }
 
 /* ---------- Home ---------- */
+let view = 'home';
 function home() {
-  round = null;
+  round = null; view = 'home';
   const L = levelOf(st.xp), span = levelStart(L + 1) - levelStart(L), p = (st.xp - levelStart(L)) / span;
   const from = homeXp == null ? st.xp : Math.max(levelStart(L), homeXp), p0 = (from - levelStart(L)) / span;
   homeXp = st.xp;
@@ -114,11 +125,13 @@ function home() {
     ${all.total ? `<button class="hero" data-t=""><div class="label" style="margin:0 0 8px">Everything</div><h2 class="serif">${all.total} ready</h2><small class="label" style="text-transform:none;letter-spacing:0;font-size:14px">A round is ${Math.min(ROUND, all.total)} card${Math.min(ROUND, all.total) > 1 ? 's' : ''}. Stop whenever.</small><div><span class="go">Play a round</span></div></button>`
       : `<div class="hero"><h2 class="serif">All caught up</h2><small style="color:var(--muted)">${deck.length ? 'Nothing is ready. Add something new, or come back later.' : 'No cards yet — tap + to add your first.'}</small></div>`}
     ${rows ? `<div class="label">Focus on a topic</div>${rows}` : ''}
+    ${deck.length ? `<button class="topic" id="lib" style="margin-top:22px;justify-content:center;color:var(--muted)">Manage cards</button>` : ''}
     <button class="fab" aria-label="Add a card">+</button>`;
+  document.getElementById('lib')?.addEventListener('click', () => library());
   requestAnimationFrame(() => requestAnimationFrame(() => { const ring = document.getElementById('ring'); if (ring) ring.style.strokeDashoffset = C * (1 - p) }));
   countUp(document.getElementById('lvxp'), from - levelStart(L), st.xp - levelStart(L), 800);
   app.querySelectorAll('[data-t]').forEach(b => b.onclick = () => start(b.dataset.t));
-  app.querySelector('.fab').onclick = () => openAdd();
+  app.querySelector('.fab').onclick = () => openEditor();
 }
 
 /* ---------- Round ---------- */
@@ -220,33 +233,111 @@ function summary() {
 }
 
 /* ---------- Add ---------- */
-function openAdd() {
-  let topic = localStorage.getItem('bloom-topic') || topics()[0] || '';
+/* ---------- Library ---------- */
+let lib = { q: '', topic: '' };
+const status = c => { const s = st.reviews[c.id]; return !s ? 'new' : s.due <= Date.now() ? 'ready' : 'in ' + fmt(s.due - Date.now()) };
+function library() {
+  round = null; view = 'library';
+  const q = lib.q.toLowerCase();
+  if (lib.topic && !deck.some(c => inTopic(c, lib.topic))) lib.topic = '';
+  const cs = deck.filter(c => inTopic(c, lib.topic) && (!q || (c.q + '\n' + c.a).toLowerCase().includes(q))).sort((a, b) => a.topic.localeCompare(b.topic));
+  let html = '', last = null;
+  for (const c of cs.slice(0, 400)) {
+    if (c.topic !== last) { last = c.topic; html += `<div class="group"><span>${esc(c.topic)}</span><button class="chip" data-rename="${esc(c.topic)}">Rename</button></div>` }
+    html += `<button class="row" data-id="${c.id}"><div><div class="serif">${md(c.q)}</div><small>${md(c.a)}</small></div><span>${status(c)}</span></button>`;
+  }
+  app.innerHTML = `
+    <div class="bar"><button class="x" aria-label="Back">←</button><div class="serif" style="flex:1;font-size:22px">Library</div><small style="color:var(--muted)">${cs.length} card${cs.length === 1 ? '' : 's'}</small></div>
+    <input id="search" type="search" placeholder="Search questions and answers" value="${esc(lib.q)}">
+    <div class="chips" style="margin:12px 0 4px"><button class="chip ${lib.topic ? '' : 'on'}" data-f="">All</button>${topics().map(t => `<button class="chip ${t === lib.topic ? 'on' : ''}" data-f="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <div class="list">${html || '<p class="empty">No cards match.</p>'}</div>
+    <button class="fab" aria-label="Add a card">+</button>`;
+  app.querySelector('.x').onclick = () => { view = 'home'; home() };
+  const s = document.getElementById('search');
+  s.oninput = () => { lib.q = s.value; const pos = s.selectionStart; library(); const n = document.getElementById('search'); n.focus(); n.setSelectionRange(pos, pos) };
+  app.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { lib.topic = b.dataset.f; library() });
+  app.querySelectorAll('[data-id]').forEach(b => b.onclick = () => openEditor(st.cards[b.dataset.id]));
+  app.querySelectorAll('[data-rename]').forEach(b => b.onclick = () => renameTopic(b.dataset.rename));
+  app.querySelector('.fab').onclick = () => openEditor();
+}
+const back = () => view === 'library' ? library() : home();
+
+function renameTopic(from) {
+  sheet.innerHTML = `<form>
+    <div style="display:flex;justify-content:space-between;align-items:center"><span class="serif" style="font-size:20px">Rename topic</span><button type="button" class="chip" data-close>Cancel</button></div>
+    <small style="color:var(--muted)">Subtopics move with it. Use › to nest, e.g. Languages › Spanish.</small>
+    <input name="to" value="${esc(from)}" required>
+    <button class="btn">Rename</button></form>`;
+  const f = sheet.querySelector('form');
+  sheet.hidden = false; f.to.focus(); f.to.select();
+  sheet.onclick = e => { if (e.target === sheet || e.target.dataset.close != null) { sheet.hidden = true } };
+  f.onsubmit = e => {
+    e.preventDefault();
+    const to = normTopic(f.to.value);
+    if (to && to !== from) {
+      for (const c of deck) if (inTopic(c, from)) c.topic = to + c.topic.slice(from.length);
+      st.pending.forEach(c => { if (inTopic(c, from)) c.topic = to + c.topic.slice(from.length) });
+      st.ops.push({ kind: 'rename', from, to });
+      if (lib.topic && inTopic({ topic: lib.topic }, from)) lib.topic = to + lib.topic.slice(from.length);
+      save(); sync(); toast(`Renamed to ${to}`);
+    }
+    sheet.hidden = true; library();
+  };
+}
+
+function editCard(card, fields) {
+  Object.assign(card, fields);
+  const queued = st.pending.find(p => p.id === card.id);
+  if (queued) Object.assign(queued, fields); else st.ops.push({ kind: 'patch', id: card.id, body: fields });
+  save(); merge(); sync();
+}
+function deleteCard(card) {
+  delete st.cards[card.id]; delete st.reviews[card.id];
+  st.outbox = st.outbox.filter(o => o.id !== card.id);
+  const i = st.pending.findIndex(p => p.id === card.id);
+  if (i >= 0) st.pending.splice(i, 1); else st.ops.push({ kind: 'delete', id: card.id });
+  save(); merge(); sync();
+}
+
+// One sheet for adding (no card) and editing (a card).
+function openEditor(card) {
+  let topic = card?.topic || localStorage.getItem('bloom-topic') || topics()[0] || '';
   const paint = () => {
     sheet.innerHTML = `<form>
-      <div style="display:flex;justify-content:space-between;align-items:center"><span class="serif" style="font-size:20px">New card</span><button type="button" class="chip" data-close>Done</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center"><span class="serif" style="font-size:20px">${card ? 'Edit card' : 'New card'}</span><button type="button" class="chip" data-close>${card ? 'Cancel' : 'Done'}</button></div>
       <div class="chips">${[...new Set([topic, ...topics()].filter(Boolean))].map(t => `<button type="button" class="chip ${t === topic ? 'on' : ''}" data-t="${esc(t)}">${esc(t)}</button>`).join('')}<button type="button" class="chip" data-new>+ topic</button></div>
       <input name="topic" placeholder="New topic" ${topic ? 'hidden' : ''} value="${esc(topic)}">
-      <textarea name="q" placeholder="Question" required></textarea>
-      <textarea name="a" placeholder="Answer" required></textarea>
-      <button class="btn">Add card</button>
+      <textarea name="q" placeholder="Question" required>${card ? esc(card.q) : ''}</textarea>
+      <textarea name="a" placeholder="Answer" required>${card ? esc(card.a) : ''}</textarea>
+      <button class="btn">${card ? 'Save' : 'Add card'}</button>
+      ${card ? `<small style="color:var(--muted);text-align:center">${status(card) === 'new' ? 'Not studied yet' : `Reviewed ${st.reviews[card.id].reps}× · next ${status(card)}`}</small><button type="button" class="btn ghost" data-del>Delete card</button>` : ''}
     </form>`;
     const f = sheet.querySelector('form');
-    sheet.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { topic = b.dataset.t; paint() });
+    // Keep what's typed when switching topic chips.
+    sheet.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { const q = f.q.value, a = f.a.value; topic = b.dataset.t; paint(); f2().q.value = q; f2().a.value = a });
+    const del = sheet.querySelector('[data-del]');
+    if (del) del.onclick = () => {
+      if (!del.dataset.armed) { del.dataset.armed = 1; del.textContent = 'Tap again to delete'; del.style.color = '#e4a08d'; return }
+      deleteCard(card); sheet.hidden = true; toast('Card deleted'); back();
+    };
     sheet.querySelector('[data-new]').onclick = () => { f.topic.hidden = false; f.topic.value = ''; f.topic.focus() };
     f.onsubmit = async e => {
       e.preventDefault();
-      topic = f.topic.value.trim() || topic || 'Inbox';
-      topic = normTopic(topic);
-      const card = { id: crypto.randomUUID().replace(/-/g, '').slice(0, 16), topic, q: f.q.value.trim(), a: f.a.value.trim() };
-      st.cards[card.id] = card; st.pending.push({ ...card, source: 'app' });
+      topic = normTopic(f.topic.value.trim() || topic || 'Inbox');
+      if (card) {
+        editCard(card, { topic, q: f.q.value.trim(), a: f.a.value.trim() });
+        sheet.hidden = true; toast('Saved'); return back();
+      }
+      const added = { id: crypto.randomUUID().replace(/-/g, '').slice(0, 16), topic, q: f.q.value.trim(), a: f.a.value.trim() };
+      st.cards[added.id] = added; st.pending.push({ ...added, source: 'app' });
       save(); merge(); localStorage.setItem('bloom-topic', topic);
-      home(); toast(`Added to ${topic}`); paint(); sync();
+      back(); toast(`Added to ${topic}`); paint(); sync();
     };
-    f.q.focus();
+    if (!card) f.q.focus();
   };
+  const f2 = () => sheet.querySelector('form');
   sheet.hidden = false; paint();
-  sheet.onclick = e => { if (e.target === sheet || e.target.dataset.close != null) { sheet.hidden = true; home() } };
+  sheet.onclick = e => { if (e.target === sheet || e.target.dataset.close != null) { sheet.hidden = true; back() } };
 }
 
 /* ---------- Boot ---------- */
@@ -272,6 +363,6 @@ document.addEventListener('keydown', e => {
 });
 merge();
 if (!apiKey) gate();
-else { home(); sync().then(ok => { if (ok && !round && sheet.hidden) home() }) }
+else { home(); sync().then(ok => { if (ok && !round && sheet.hidden) back() }) }
 addEventListener('online', () => apiKey && sync());
-addEventListener('visibilitychange', () => { if (!document.hidden && apiKey) sync().then(() => { if (!round && sheet.hidden) home() }) });
+addEventListener('visibilitychange', () => { if (!document.hidden && apiKey) sync().then(() => { if (!round && sheet.hidden) back() }) });

@@ -17,6 +17,7 @@ or commit it.
 | POST | `/cards` | Add cards: `{"cards":[{"topic","q","a","source"}]}` |
 | PATCH | `/cards/:id` | Fix `topic`, `q`, `a` or `source` |
 | DELETE | `/cards/:id` | Remove a card |
+| POST | `/topics/rename` | Move a topic and its subtopics: `{"from","to"}` |
 
 `POST /cards` returns `{added, skipped}`. A card is skipped when its question
 already exists in that topic (ignoring case and spacing) or a field is missing.

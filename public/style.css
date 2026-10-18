@@ -105,3 +105,15 @@ input:focus, textarea:focus { outline: none; border-color: var(--brass) }
 .summary > :nth-child(4) { animation-delay: .2s } .summary > :nth-child(5) { animation-delay: .25s }
 .stat b { font-variant-numeric: tabular-nums } .chest, .xp { font-variant-numeric: tabular-nums }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important } }
+
+/* Library */
+input[type=search] { -webkit-appearance: none }
+.list { display: grid; gap: 6px; margin-top: 8px }
+.group { display: flex; justify-content: space-between; align-items: center; margin: 18px 4px 4px; color: var(--muted); font-size: 12px; letter-spacing: .1em; text-transform: uppercase }
+.group .chip { padding: 5px 12px; font-size: 12px; letter-spacing: 0; text-transform: none }
+.row { display: flex; justify-content: space-between; gap: 12px; text-align: left; background: var(--surface); border-radius: 16px; padding: 14px 16px; width: 100% }
+.row > div { min-width: 0 }
+.row .serif { font-size: 17px; line-height: 1.35 }
+.row small { display: block; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px }
+.row > span { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 3px }
+.row:active { background: var(--raised) }

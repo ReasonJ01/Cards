@@ -55,6 +55,15 @@ export default {
       return json(results);
     }
 
+    // Moves a topic and its subtopics: "Spanish" → "Languages › Spanish".
+    if (path === '/api/topics/rename' && M === 'POST') {
+      const from = body?.from?.trim(), to = body?.to?.trim().split(/\s*(?:›|>|::|\/)\s*/).filter(Boolean).join(' › ');
+      if (!from || !to) return json({ error: 'send {from, to}' }, 400);
+      const r = await db.prepare("UPDATE cards SET topic = ? || substr(topic, ?), updated = ? WHERE deleted = 0 AND (topic = ? OR topic LIKE ?)")
+        .bind(to, from.length + 1, Date.now(), from, from + ' › %').run();
+      return json({ ok: true, moved: r.meta.changes });
+    }
+
     if (path === '/api/cards' && M === 'GET') {
       const topic = url.searchParams.get('topic'), q = url.searchParams.get('q');
       let sql = 'SELECT id, topic, q, a, source, reps, due FROM cards WHERE deleted = 0', args = [];
