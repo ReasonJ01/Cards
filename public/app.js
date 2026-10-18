@@ -294,7 +294,7 @@ function library() {
   let html = '', last = null;
   for (const c of cs.slice(0, 400)) {
     if (c.topic !== last) { last = c.topic; html += `<div class="group"><span>${esc(c.topic)}</span><button class="chip" data-rename="${esc(c.topic)}">Rename</button></div>` }
-    html += `<button class="row" data-id="${c.id}"><div><div class="serif">${md(c.q)}</div><small>${md(c.a)}</small></div><span>${status(c)}</span></button>`;
+    html += `<button class="row" data-id="${c.id}"><div><div class="serif">${md(c.q.replace(/\s*\n\s*/g, ' '))}</div><small>${md(c.a.replace(/\s*\n\s*/g, ' '))}</small></div><span>${status(c)}</span></button>`;
   }
   app.innerHTML = `
     <div class="bar"><button class="x" aria-label="Back">←</button><div class="serif" style="flex:1;font-size:22px">Library</div><small style="color:var(--muted)">${cs.length} card${cs.length === 1 ? '' : 's'}</small><button class="chip" id="import">Paste</button></div>
