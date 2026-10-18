@@ -174,20 +174,20 @@ details table { max-height: 240px }
 
 /* Knowledge map */
 .links #map { grid-column: span 2 }
-.mapwrap { position: relative; padding-right: 56px }
-.arcs { position: absolute; top: 0; right: 0; width: 56px; overflow: visible; pointer-events: none }
-.maplist { display: grid; gap: 4px }
-.mrow { display: grid; grid-template-columns: 1fr 64px 40px; align-items: center; gap: 10px; text-align: left; padding: 10px 12px 10px calc(12px + var(--d) * 18px); background: var(--surface); border-radius: 14px; position: relative }
-.mrow::before { content: ''; position: absolute; left: calc(4px + var(--d) * 18px); top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: var(--line) }
-.mrow[style*="--d:0"]::before { display: none }
+.maplist .trow .tog { height: 52px }
+.mrow { flex: 1; min-width: 0; display: grid; gap: 7px; text-align: left; padding: 12px 14px; margin-bottom: 8px; background: var(--surface); border-radius: 16px }
 .mrow.sel { box-shadow: inset 0 0 0 1px var(--brass) }
 .mrow:active { background: var(--raised) }
-.mrow .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px }
-.mrow[style*="--d:0"] .nm { font-weight: 600 }
-.mrow .nm small { display: block; color: var(--muted); font-size: 12px }
+.mtop { display: flex; justify-content: space-between; align-items: baseline; gap: 12px }
+.mrow .nm { font-size: 15px; line-height: 1.3; overflow-wrap: anywhere }
+.mrow.top .nm { font-weight: 600; font-size: 16px }
+.mrow .pc { flex: none; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums }
 .meter { height: 6px; border-radius: 3px; background: #1c4a3a; overflow: hidden }
 .meter i { display: block; height: 100%; border-radius: 3px }
-.mrow .pc { font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink) }
+.msub { color: var(--muted); font-size: 12px; line-height: 1.5 }
+.reqs { display: block; margin-top: 2px }
+.pre { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; color: var(--ink) }
+.pre i { width: 8px; height: 8px; border-radius: 50%; flex: none }
 .deps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px }
 .chip.dep { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); white-space: normal; text-align: left }
 .chip.dep i { width: 9px; height: 9px; border-radius: 50%; flex: none }
@@ -209,3 +209,4 @@ select { width: 100%; font: inherit; font-size: 15px; color: var(--ink); backgro
 .row small { overflow-wrap: anywhere }
 .row code { font-size: .88em }
 .row > span { white-space: nowrap }
+.pre i { box-shadow: 0 0 0 1px #ffffff40 }
