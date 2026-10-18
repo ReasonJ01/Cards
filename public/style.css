@@ -194,3 +194,10 @@ details table { max-height: 240px }
 .chip.dep small { color: var(--muted) }
 .chip.dep button { color: var(--muted); font-size: 16px; line-height: 1; padding: 0 0 0 4px }
 select { width: 100%; font: inherit; font-size: 15px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 12px }
+
+/* Home topic tree */
+.trow { display: flex; align-items: center; gap: 4px; margin-left: calc(var(--d) * 22px) }
+.trow .topic { margin-bottom: 8px; flex: 1; min-width: 0 }
+.trow .topic span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.trow .tog { flex: none; width: 30px; height: 44px; margin-bottom: 8px; display: grid; place-items: center; color: var(--muted); font-size: 22px; transition: transform .2s }
+.trow .tog.open { transform: rotate(90deg) }

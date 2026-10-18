@@ -115,6 +115,23 @@ function float(t) { const e = Object.assign(document.createElement('div'), { cla
 /* ---------- Home ---------- */
 let view = 'home';
 
+// Home topic list as a collapsible tree: each row shows only its own name, and
+// a parent's row studies (and counts) everything beneath it.
+let open;
+try { open = new Set(JSON.parse(localStorage.getItem('bloom-open')) || []) } catch { open = new Set() }
+function topicTree() {
+  const paths = new Set();
+  for (const t of topics()) t.split(' › ').forEach((_, i, a) => paths.add(a.slice(0, i + 1).join(' › ')));
+  const all = [...paths].sort((a, b) => a.localeCompare(b));
+  return all.filter(p => { const a = p.split(' › '); return a.every((_, i) => i === a.length - 1 || open.has(a.slice(0, i + 1).join(' › '))) }).map(p => {
+    const depth = p.split(' › ').length - 1, kids = all.some(q => q.startsWith(p + ' › ')), r = ready(p);
+    return `<div class="trow" style="--d:${depth}">
+      ${kids ? `<button class="tog ${open.has(p) ? 'open' : ''}" data-tog="${esc(p)}" aria-label="${open.has(p) ? 'Collapse' : 'Expand'} ${esc(p)}" aria-expanded="${open.has(p)}">›</button>` : '<span class="tog"></span>'}
+      <button class="topic" data-t="${esc(p)}"><span>${esc(p.split(' › ').at(-1))}</span><span class="${r.total ? 'hot' : ''}">${r.total ? r.total + ' ready' : '✓'}</span></button>
+    </div>`;
+  }).join('');
+}
+
 // Navigation: every screen and open sheet is a history entry, so browser
 // back/forward (and Chrome's swipe gestures) move through the app.
 function nav(state, replace) {
@@ -139,7 +156,7 @@ function home() {
   const from = homeXp == null ? st.xp : Math.max(levelStart(L), homeXp), p0 = (from - levelStart(L)) / span;
   homeXp = st.xp;
   const all = ready(), C = 2 * Math.PI * 25;
-  const rows = topics().map(t => { const r = ready(t); return `<button class="topic" data-t="${esc(t)}"><span>${esc(t)}</span><span class="${r.total ? 'hot' : ''}">${r.total ? r.total + ' ready' : '✓'}</span></button>` }).join('');
+  const rows = topicTree();
   app.innerHTML = `
     <div class="top">
       <div class="ring"><svg width="58" height="58"><circle cx="29" cy="29" r="25" fill="none" stroke="#ffffff14" stroke-width="4"/><circle cx="29" cy="29" r="25" fill="none" stroke="#c9a35a" stroke-width="4" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - p0)}" id="ring"/></svg><b>${L}</b></div>
@@ -157,6 +174,11 @@ function home() {
   requestAnimationFrame(() => requestAnimationFrame(() => { const ring = document.getElementById('ring'); if (ring) ring.style.strokeDashoffset = C * (1 - p) }));
   countUp(document.getElementById('lvxp'), from - levelStart(L), st.xp - levelStart(L), 800);
   app.querySelectorAll('[data-t]').forEach(b => b.onclick = () => start(b.dataset.t));
+  app.querySelectorAll('[data-tog]').forEach(b => b.onclick = () => {
+    const t = b.dataset.tog; open.has(t) ? open.delete(t) : open.add(t);
+    try { localStorage.setItem('bloom-open', JSON.stringify([...open])) } catch {}
+    home();
+  });
   app.querySelector('.fab').onclick = () => openEditor();
 }
 
