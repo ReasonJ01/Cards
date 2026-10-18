@@ -6,7 +6,7 @@ const app = document.getElementById('app'), sheet = document.getElementById('she
 
 let st;
 try { st = JSON.parse(localStorage.getItem(KEY)) } catch {}
-st = { cards: {}, reviews: {}, outbox: [], since: 0, xp: 0, streak: 0, lastDay: null, newDay: null, newCount: 0, ...st };
+st = { cards: {}, reviews: {}, outbox: [], pending: [], since: 0, xp: 0, streak: 0, lastDay: null, newDay: null, newCount: 0, ...st };
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)) } catch {} };
 
 /* ---------- Server ---------- */
@@ -19,8 +19,33 @@ async function api(path, opts = {}) {
 }
 const STATS = ['xp', 'streak', 'lastDay', 'newDay', 'newCount'];
 const statsOf = () => Object.fromEntries(STATS.map(k => [k, st[k]]));
-async function sync() {
+// Writes are optimistic: they land in local state at once and queue here.
+// sync() drains the queues in order (new cards before reviews of them) and
+// retries with capped exponential backoff and full jitter until it succeeds.
+const normTopic = t => t.trim().split(/\s*(?:›|>|::|\/)\s*/).filter(Boolean).join(' › ');
+let syncing = null, again = false, attempt = 0, retryTimer;
+function sync() {
+  if (syncing) { again = true; return syncing }
+  clearTimeout(retryTimer);
+  syncing = syncOnce().then(ok => {
+    syncing = null;
+    if (ok) attempt = 0;
+    else if (apiKey) retryTimer = setTimeout(sync, Math.random() * Math.min(60e3, 1e3 * 2 ** attempt++));
+    if (again) { again = false; return sync() }
+    return ok;
+  });
+  return syncing;
+}
+async function syncOnce() {
   try {
+    if (st.pending.length) {
+      const out = st.pending.slice(), r = await api('/cards', { method: 'POST', body: { cards: out } });
+      for (const s of r.skipped) if (s.reason !== 'already added') {
+        delete st.cards[s.id]; st.outbox = st.outbox.filter(o => o.id !== s.id); delete st.reviews[s.id];
+        toast(s.reason === 'duplicate question in this topic' ? 'You already had that card' : 'A card couldn’t be saved: ' + s.reason);
+      }
+      st.pending = st.pending.slice(out.length); save();
+    }
     if (st.outbox.length) { const out = st.outbox.slice(); await api('/reviews', { method: 'POST', body: out }); st.outbox = st.outbox.slice(out.length) }
     const r = await api('/sync?since=' + st.since);
     for (const c of r.cards) {
@@ -185,12 +210,11 @@ function openAdd() {
     f.onsubmit = async e => {
       e.preventDefault();
       topic = f.topic.value.trim() || topic || 'Inbox';
-      try {
-        const r = await api('/cards', { method: 'POST', body: { cards: [{ topic, q: f.q.value, a: f.a.value, source: 'app' }] } });
-        if (!r.added.length) return toast(r.skipped[0]?.reason || 'Not added');
-        topic = r.added[0].topic; localStorage.setItem('bloom-topic', topic);
-        await sync(); home(); toast(`Added to ${topic}`); paint();
-      } catch { toast('Offline — card not added') }
+      topic = normTopic(topic);
+      const card = { id: crypto.randomUUID().replace(/-/g, '').slice(0, 16), topic, q: f.q.value.trim(), a: f.a.value.trim() };
+      st.cards[card.id] = card; st.pending.push({ ...card, source: 'app' });
+      save(); merge(); localStorage.setItem('bloom-topic', topic);
+      home(); toast(`Added to ${topic}`); paint(); sync();
     };
     f.q.focus();
   };
@@ -222,4 +246,5 @@ document.addEventListener('keydown', e => {
 merge();
 if (!apiKey) gate();
 else { home(); sync().then(ok => { if (ok && !round && sheet.hidden) home() }) }
+addEventListener('online', () => apiKey && sync());
 addEventListener('visibilitychange', () => { if (!document.hidden && apiKey) sync().then(() => { if (!round && sheet.hidden) home() }) });

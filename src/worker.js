@@ -67,15 +67,19 @@ export default {
     if (path === '/api/cards' && M === 'POST') {
       const list = Array.isArray(body) ? body : body?.cards;
       if (!Array.isArray(list) || !list.length) return json({ error: 'send {cards: [{topic, q, a, source?}]}' }, 400);
-      const { results: existing } = await db.prepare('SELECT topic, q FROM cards WHERE deleted = 0').all();
-      const seen = new Set(existing.map(c => c.topic + '\n' + norm(c.q)));
+      const { results: existing } = await db.prepare('SELECT id, topic, q, deleted FROM cards').all();
+      const seen = new Set(existing.filter(c => !c.deleted).map(c => c.topic + '\n' + norm(c.q)));
+      const ids = new Set(existing.map(c => c.id));
       const now = Date.now(), added = [], skipped = [];
       for (const c of list) {
         const topic = c.topic?.trim().split(/\s*(?:›|>|::|\/)\s*/).filter(Boolean).join(' › ');
         if (!topic || !c.q?.trim() || !c.a?.trim()) { skipped.push({ ...c, reason: 'needs topic, q and a' }); continue }
+        // Clients may supply their own id so retries are idempotent.
+        if (c.id != null && !/^[\w-]{6,40}$/.test(c.id)) { skipped.push({ id: c.id, q: c.q, reason: 'bad id' }); continue }
+        if (ids.has(c.id)) { skipped.push({ id: c.id, q: c.q, reason: 'already added' }); continue }
         const k = topic + '\n' + norm(c.q);
-        if (seen.has(k)) { skipped.push({ q: c.q, reason: 'duplicate question in this topic' }); continue }
-        seen.add(k); added.push({ id: id(), topic, q: c.q.trim(), a: c.a.trim(), source: c.source || null });
+        if (seen.has(k)) { skipped.push({ id: c.id, q: c.q, reason: 'duplicate question in this topic' }); continue }
+        seen.add(k); added.push({ id: c.id || id(), topic, q: c.q.trim(), a: c.a.trim(), source: c.source || null });
       }
       if (added.length) await db.batch(added.map(c => db.prepare('INSERT INTO cards (id, topic, q, a, source, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(c.id, c.topic, c.q, c.a, c.source, now, now)));
       return json({ added, skipped }, added.length ? 201 : 200);
