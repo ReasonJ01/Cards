@@ -236,3 +236,8 @@ select { width: 100%; font: inherit; font-size: 15px; color: var(--ink); backgro
 .bar .flag.on { color: #e4a08d; background: #e4a08d22 }
 .flagbar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0 8px }
 .row .fl { color: #e4a08d; font-weight: 400 }
+
+/* Explanation, shown after the answer */
+.card .ex { font-size: 15px; line-height: 1.5; color: var(--muted); text-align: left; padding: 14px 16px; background: #0b241966; border-radius: 14px; animation: fade .3s }
+.card .ex code { font-size: .9em }
+.xbox { min-height: 60px; font-size: 15px }

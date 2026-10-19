@@ -64,7 +64,7 @@ async function syncOnce() {
     const r = await api('/sync?since=' + st.since);
     for (const c of r.cards) {
       if (c.deleted) { delete st.cards[c.id]; delete st.reviews[c.id]; continue }
-      st.cards[c.id] = { id: c.id, topic: c.topic, q: c.q, a: c.a, created: c.created, flagged: c.flagged ? 1 : 0 };
+      st.cards[c.id] = { id: c.id, topic: c.topic, q: c.q, a: c.a, explanation: c.explanation || '', created: c.created, flagged: c.flagged ? 1 : 0 };
       // Local state wins while a review of this card is still waiting to upload.
       if (c.reps && !st.outbox.some(o => o.id === c.id)) st.reviews[c.id] = { s: c.s, d: c.d, last: c.last, due: c.due, reps: c.reps, lapses: c.lapses };
     }
@@ -230,7 +230,7 @@ function draw() {
     <div class="card ${round.gilded ? 'gilded' : ''} ${round.flipped ? '' : 'enter'}">
       <div class="t">${round.gilded ? 'Gilded · ×5 xp' : esc(c.topic)}${!s ? ' · new' : s.due > Date.now() ? ` · ahead, due in ${fmt(s.due - Date.now())}` : ''}</div>
       <div class="q serif">${md(c.q)}</div>
-      ${round.flipped ? `<div class="a serif">${md(c.a)}</div>` : '<div class="tap">tap to reveal</div>'}
+      ${round.flipped ? `<div class="a serif">${md(c.a)}</div>${c.explanation ? `<div class="ex">${md(c.explanation)}</div>` : ''}` : '<div class="tap">tap to reveal</div>'}
     </div>
     ${round.flipped ? `<div class="dock"><div class="grades">${['Again', 'Hard', 'Good', 'Easy'].map((n, i) => `<button class="g${i + 1}" data-g="${i + 1}">${n}<small>${fmt(iv[i])}</small></button>`).join('')}</div></div>` : ''}`;
   const pct = 100 * round.done / round.size, bar = app.querySelector('.progress i');
@@ -412,8 +412,8 @@ function deleteCard(card) {
 }
 
 // New cards show at once and upload in the background (see sync).
-function queueCard({ topic, q, a, source }) {
-  const card = { id: crypto.randomUUID().replace(/-/g, '').slice(0, 16), topic, q, a, created: Date.now() };
+function queueCard({ topic, q, a, explanation, source }) {
+  const card = { id: crypto.randomUUID().replace(/-/g, '').slice(0, 16), topic, q, a, explanation: explanation || '', created: Date.now() };
   st.cards[card.id] = card; st.pending.push({ ...card, source });
 }
 
@@ -432,14 +432,15 @@ Rules (from Woźniak's "Twenty Rules of Formulating Knowledge"):
 - No lists or sets ("name the 5 …"): one card per item instead.
 - Ask precisely so there is exactly one right answer; add context like "In Rust, …".
 - Keep wording short. Keep each card's topic unless it's clearly wrong.
+- Keep or add an optional "explanation", shown after the answer: why it's true, a mnemonic, or a common mix-up. Aim for one or two sentences (roughly 250 characters at most). Leave it out when the answer speaks for itself, and never just restate the answer.
 - If a card is fine as it is, keep it unchanged; if it's not worth keeping, leave it out.
 - **bold**, *italic* and \`code\` render; otherwise plain text.
 
 Reply with only this JSON in a code block, nothing else:
-{"cards":[{"topic":"…","q":"…","a":"…"}]}
+{"cards":[{"topic":"…","q":"…","a":"…","explanation":"… or omit"}]}
 
 The flagged cards:
-${JSON.stringify(cards.map(c => ({ topic: c.topic, q: c.q, a: c.a })), null, 1)}`;
+${JSON.stringify(cards.map(c => ({ topic: c.topic, q: c.q, a: c.a, ...(c.explanation ? { explanation: c.explanation } : {}) })), null, 1)}`;
 }
 
 function agentPrompt() {
@@ -452,6 +453,7 @@ Rules (from Woźniak's "Twenty Rules of Formulating Knowledge"):
 - Ask precisely so there is exactly one right answer; add context like "In Rust, …".
 - Make cards both ways when both directions matter (word → meaning and meaning → word).
 - Keep wording short. Only cover what I've learned or asked about; don't pad.
+- Optionally add an "explanation", shown after the answer: why it's true, a mnemonic, or a common mix-up. Aim for one or two sentences (roughly 250 characters at most). Leave it out when the answer speaks for itself, and never just restate the answer.
 - **bold**, *italic* and \`code\` render; otherwise plain text.
 
 Topics are paths, most general first, joined with " › ", in Title Case, 2–3 levels deep.
@@ -461,7 +463,7 @@ Optionally, add prerequisite links between topics: "topic" builds on "requires".
 ${st.links.length ? `Links I already have:\n${st.links.map(l => `- ${l.topic} requires ${l.requires}`).join('\n')}` : ''}
 
 Reply with only this JSON in a code block, nothing else ("links" may be omitted):
-{"cards":[{"topic":"Computing › Rust › Lifetimes","q":"In Rust, what does 'a denote in a function signature?","a":"A lifetime parameter","source":"where it came from, or null"}],
+{"cards":[{"topic":"Computing › Rust › Lifetimes","q":"In Rust, what does 'a denote in a function signature?","a":"A lifetime parameter","explanation":"It names how long a reference must stay valid, so the compiler can check borrows across the call.","source":"where it came from, or null"}],
  "links":[{"topic":"Computing › Rust › Lifetimes","requires":"Computing › Rust › Ownership"}]}`;
 }
 
@@ -470,7 +472,7 @@ function openImport() {
   sheet.innerHTML = `<form class="import">
     <div style="display:flex;justify-content:space-between;align-items:center"><span class="serif" style="font-size:20px">Paste cards</span><button type="button" class="chip" data-close>Cancel</button></div>
     <textarea name="t" rows="8" placeholder="${esc(EXAMPLE)}" spellcheck="false"></textarea>
-    <small style="color:var(--muted)">JSON from an agent, or Anki text export: one card per line as question ; answer ; topic (tabs work too). <button type="button" class="link" id="copy" style="color:var(--brass-hi)">Copy agent prompt</button></small>
+    <small style="color:var(--muted)">JSON from an agent, or Anki text export: one card per line as question ; answer ; topic ; explanation (the last two optional; tabs work too). <button type="button" class="link" id="copy" style="color:var(--brass-hi)">Copy agent prompt</button></small>
     <div id="pv"></div>
     <button class="btn" id="go" disabled>Add cards</button>
   </form>`;
@@ -531,6 +533,7 @@ function openEditor(card) {
       <input name="topic" placeholder="New topic" ${topic ? 'hidden' : ''} value="${esc(topic)}">
       <textarea name="q" placeholder="Question" required>${card ? esc(card.q) : ''}</textarea>
       <textarea name="a" placeholder="Answer" required>${card ? esc(card.a) : ''}</textarea>
+      <textarea name="x" class="xbox" placeholder="Explanation (optional) — why it's true, a mnemonic, a common mix-up">${card ? esc(card.explanation || '') : ''}</textarea>
       <button class="btn">${card ? 'Save' : 'Add card'}</button>
       ${card ? `<small style="color:var(--muted);text-align:center">${status(card) === 'new' ? 'Not studied yet' : `Reviewed ${st.reviews[card.id].reps}× · next ${status(card)}`}</small><button type="button" class="btn ghost" data-flag>${card.flagged ? 'Unflag' : '⚑ Flag for rewrite'}</button><button type="button" class="btn ghost" data-del>Delete card</button>` : ''}
     </form>`;
@@ -550,10 +553,10 @@ function openEditor(card) {
       e.preventDefault();
       topic = normTopic(f.topic.value.trim() || topic || 'Inbox');
       if (card) {
-        editCard(card, { topic, q: f.q.value.trim(), a: f.a.value.trim() });
+        editCard(card, { topic, q: f.q.value.trim(), a: f.a.value.trim(), explanation: f.x.value.trim() });
         toast('Saved'); return goBack();
       }
-      queueCard({ topic, q: f.q.value.trim(), a: f.a.value.trim(), source: 'app' });
+      queueCard({ topic, q: f.q.value.trim(), a: f.a.value.trim(), explanation: f.x.value.trim(), source: 'app' });
       save(); merge(); localStorage.setItem('bloom-topic', topic);
       refresh(); toast(`Added to ${topic}`); paint(); sync();
     };

@@ -15,8 +15,8 @@ or commit it.
 | GET | `/topics` | Existing topics with card counts. **Call this first.** |
 | GET | `/cards?topic=T&q=text` | List or search cards (topic includes subtopics) |
 | GET | `/cards?flagged=1` | Cards the owner flagged as poorly written |
-| POST | `/cards` | Add cards: `{"cards":[{"topic","q","a","source"}]}` |
-| PATCH | `/cards/:id` | Fix `topic`, `q`, `a`, `source`, or set `flagged` |
+| POST | `/cards` | Add cards: `{"cards":[{"topic","q","a","explanation","source"}]}` |
+| PATCH | `/cards/:id` | Fix `topic`, `q`, `a`, `explanation`, `source`, or set `flagged` |
 | DELETE | `/cards/:id` | Remove a card |
 | POST | `/topics/rename` | Move a topic and its subtopics: `{"from","to"}` |
 | GET | `/links` | Prerequisite links between topics |
@@ -45,7 +45,8 @@ duplicates:
 
 Prerequisite links can ride along in the same JSON as
 `"links":[{"topic","requires"}]`. The paste box also accepts Anki's text
-export: one card per line as `question;answer;topic` (or tab-separated).
+export: one card per line as `question;answer;topic;explanation` (or
+tab-separated; topic and explanation optional).
 
 ### Flagged cards
 
@@ -105,6 +106,13 @@ Matuschak's notes on prompts). In practice:
 8. **Keep wording short.** Cut every word that doesn't help recall.
 9. **Link to what the user already knows.** Examples and personal context help.
 10. **Give a source** in `source` (book, URL, lesson) when there is one.
+
+**Explanations (optional).** `explanation` is shown after the answer is
+revealed. Use it for what helps the answer stick: why it's true, a mnemonic,
+or a common mix-up. Aim for one or two sentences, roughly 250 characters at
+most (not enforced). Leave it out when the answer speaks for itself, and never
+just restate the answer. Keep the answer itself short; the explanation is not
+a place to hide a second fact to memorise.
 
 Formatting: `**bold**`, `*italic*`, `` `code` `` and line breaks render. Keep
 it plain otherwise.

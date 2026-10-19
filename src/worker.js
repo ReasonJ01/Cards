@@ -100,7 +100,7 @@ export default {
 
     if (path === '/api/cards' && M === 'GET') {
       const topic = url.searchParams.get('topic'), q = url.searchParams.get('q');
-      let sql = 'SELECT id, topic, q, a, source, reps, due, flagged FROM cards WHERE deleted = 0', args = [];
+      let sql = 'SELECT id, topic, q, a, explanation, source, reps, due, flagged FROM cards WHERE deleted = 0', args = [];
       if (url.searchParams.get('flagged') === '1') sql += ' AND flagged = 1';
       if (topic) { sql += ' AND (topic = ? OR topic LIKE ?)'; args.push(topic, topic + ' › %') }
       if (q) { sql += ' AND (q LIKE ? OR a LIKE ?)'; args.push(`%${q}%`, `%${q}%`) }
@@ -110,7 +110,7 @@ export default {
 
     if (path === '/api/cards' && M === 'POST') {
       const list = Array.isArray(body) ? body : body?.cards;
-      if (!Array.isArray(list) || !list.length) return json({ error: 'send {cards: [{topic, q, a, source?}]}' }, 400);
+      if (!Array.isArray(list) || !list.length) return json({ error: 'send {cards: [{topic, q, a, explanation?, source?}]}' }, 400);
       const { results: existing } = await db.prepare('SELECT id, topic, q, deleted FROM cards').all();
       const seen = new Set(existing.filter(c => !c.deleted).map(c => c.topic + '\n' + norm(c.q)));
       const ids = new Set(existing.map(c => c.id));
@@ -123,15 +123,15 @@ export default {
         if (ids.has(c.id)) { skipped.push({ id: c.id, q: c.q, reason: 'already added' }); continue }
         const k = topic + '\n' + norm(c.q);
         if (seen.has(k)) { skipped.push({ id: c.id, q: c.q, reason: 'duplicate question in this topic' }); continue }
-        seen.add(k); added.push({ id: c.id || id(), topic, q: c.q.trim(), a: c.a.trim(), source: c.source || null });
+        seen.add(k); added.push({ id: c.id || id(), topic, q: c.q.trim(), a: c.a.trim(), explanation: typeof c.explanation === 'string' && c.explanation.trim() || null, source: c.source || null });
       }
-      if (added.length) await db.batch(added.map(c => db.prepare('INSERT INTO cards (id, topic, q, a, source, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(c.id, c.topic, c.q, c.a, c.source, now, now)));
+      if (added.length) await db.batch(added.map(c => db.prepare('INSERT INTO cards (id, topic, q, a, explanation, source, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(c.id, c.topic, c.q, c.a, c.explanation, c.source, now, now)));
       return json({ added, skipped }, added.length ? 201 : 200);
     }
 
     const m = path.match(/^\/api\/cards\/([\w-]+)$/);
     if (m && M === 'PATCH') {
-      const fields = ['topic', 'q', 'a', 'source'].filter(k => typeof body?.[k] === 'string');
+      const fields = ['topic', 'q', 'a', 'explanation', 'source'].filter(k => typeof body?.[k] === 'string');
       const values = fields.map(k => body[k].trim());
       if (body && 'flagged' in body) { fields.push('flagged'); values.push(body.flagged ? 1 : 0) }
       if (!fields.length) return json({ error: 'nothing to update' }, 400);

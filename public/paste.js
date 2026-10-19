@@ -1,8 +1,9 @@
 // Parses pasted cards. Two formats, detected automatically:
-//   1. JSON — the API's {"cards":[{topic,q,a,source}]} or a bare array, plus an
+//   1. JSON — the API's {"cards":[{topic,q,a,explanation,source}]} or a bare array, plus an
 //      optional "links":[{topic,requires}] list of prerequisites.
-//   2. Anki's text export: one card per line: question<TAB>answer[<TAB>topic], or the same with ";".
-// Returns { cards: [{topic, q, a, source}], links: [{topic, requires}], errors: [string] }. Cards without a
+//   2. Anki's text export: one card per line as question;answer[;topic[;explanation]],
+//      tab-separated or with ";".
+// Returns { cards: [{topic, q, a, explanation, source}], links: [{topic, requires}], errors: [string] }. Cards without a
 // topic get topic '' so the caller can apply a default.
 export const normTopic = t => (t || '').trim().split(/\s*(?:›|>|::|\/)\s*/).filter(Boolean).join(' › ');
 export const normQ = s => s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -19,7 +20,8 @@ function clean(list, errors) {
   list.forEach((c, i) => {
     const q = String(c.q ?? c.question ?? c.front ?? '').trim(), a = String(c.a ?? c.answer ?? c.back ?? '').trim();
     if (!q || !a) return errors.push(`${c.where || 'Card ' + (i + 1)}: missing ${q ? 'answer' : 'question'}`);
-    cards.push({ topic: normTopic(c.topic), q, a, source: c.source ? String(c.source) : null });
+    const explanation = String(c.explanation ?? c.explain ?? '').trim() || null;
+    cards.push({ topic: normTopic(c.topic), q, a, explanation, source: c.source ? String(c.source) : null });
   });
   return { cards, errors };
 }
@@ -44,8 +46,8 @@ function fromLines(src) {
   const rows = [];
   lines.forEach((l, i) => {
     if (!l.trim() || l.startsWith('#')) return; // Anki exports start with #separator: lines
-    const [q, a, topic] = l.split(sep);
-    rows.push({ q, a, topic, where: 'Line ' + (i + 1) });
+    const [q, a, topic, explanation] = l.split(sep);
+    rows.push({ q, a, topic, explanation, where: 'Line ' + (i + 1) });
   });
   return clean(rows, []);
 }
