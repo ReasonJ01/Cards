@@ -18,6 +18,7 @@ or commit it.
 | POST | `/cards` | Add cards: `{"cards":[{"topic","q","a","explanation","source"}]}` |
 | PATCH | `/cards/:id` | Fix `topic`, `q`, `a`, `explanation`, `source`, or set `flagged` |
 | DELETE | `/cards/:id` | Remove a card |
+| POST | `/cards/bulk` | Change many cards at once: `{"ids":[…], "topic"?, "flagged"?, "reset"?, "delete"?}` |
 | POST | `/topics/rename` | Move a topic and its subtopics: `{"from","to"}` |
 | GET | `/links` | Prerequisite links between topics |
 | POST / DELETE | `/links` | Add or remove: `{"links":[{"topic","requires"}]}` |

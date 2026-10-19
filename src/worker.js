@@ -129,6 +129,21 @@ export default {
       return json({ added, skipped }, added.length ? 201 : 200);
     }
 
+    // Bulk changes: {ids, topic?, flagged?, reset?, delete?}. One request for any number of cards.
+    if (path === '/api/cards/bulk' && M === 'POST') {
+      const ids = Array.isArray(body?.ids) ? body.ids.filter(x => typeof x === 'string') : [];
+      if (!ids.length) return json({ error: 'send {ids: [...], topic?, flagged?, reset?, delete?}' }, 400);
+      const sets = [], vals = [];
+      if (body.delete) sets.push('deleted = 1');
+      if (typeof body.topic === 'string' && normTopic(body.topic)) { sets.push('topic = ?'); vals.push(normTopic(body.topic)) }
+      if ('flagged' in body) { sets.push('flagged = ?'); vals.push(body.flagged ? 1 : 0) }
+      if (body.reset) sets.push('s = NULL, d = NULL, last = NULL, due = NULL, reps = 0, lapses = 0');
+      if (!sets.length) return json({ error: 'nothing to change' }, 400);
+      const now = Date.now(), sql = `UPDATE cards SET ${sets.join(', ')}, updated = ? WHERE id = ? AND deleted = 0`;
+      const res = await db.batch(ids.map(id => db.prepare(sql).bind(...vals, now, id)));
+      return json({ ok: true, changed: res.reduce((n, r) => n + r.meta.changes, 0) });
+    }
+
     const m = path.match(/^\/api\/cards\/([\w-]+)$/);
     if (m && M === 'PATCH') {
       const fields = ['topic', 'q', 'a', 'explanation', 'source'].filter(k => typeof body?.[k] === 'string');

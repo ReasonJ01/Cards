@@ -55,6 +55,7 @@ async function syncOnce() {
       try {
         if (o.kind === 'patch') await api('/cards/' + o.id, { method: 'PATCH', body: o.body });
         else if (o.kind === 'delete') await api('/cards/' + o.id, { method: 'DELETE' });
+        else if (o.kind === 'bulk') await api('/cards/bulk', { method: 'POST', body: { ids: o.ids, ...o.body } });
         else if (o.kind === 'rename') await api('/topics/rename', { method: 'POST', body: { from: o.from, to: o.to } });
         else if (o.kind === 'link' || o.kind === 'unlink') await api('/links', { method: o.kind === 'link' ? 'POST' : 'DELETE', body: { topic: o.topic, requires: o.requires } });
       } catch (e) { if (e.status !== 404) throw e }
@@ -66,7 +67,10 @@ async function syncOnce() {
       if (c.deleted) { delete st.cards[c.id]; delete st.reviews[c.id]; continue }
       st.cards[c.id] = { id: c.id, topic: c.topic, q: c.q, a: c.a, explanation: c.explanation || '', created: c.created, flagged: c.flagged ? 1 : 0 };
       // Local state wins while a review of this card is still waiting to upload.
-      if (c.reps && !st.outbox.some(o => o.id === c.id)) st.reviews[c.id] = { s: c.s, d: c.d, last: c.last, due: c.due, reps: c.reps, lapses: c.lapses };
+      if (!st.outbox.some(o => o.id === c.id)) {
+        if (c.reps) st.reviews[c.id] = { s: c.s, d: c.d, last: c.last, due: c.due, reps: c.reps, lapses: c.lapses };
+        else delete st.reviews[c.id]; // progress reset elsewhere
+      }
     }
     // Ops are drained above, so the server's links are current.
     st.links = r.links || [];
@@ -310,48 +314,144 @@ function summary() {
 
 /* ---------- Add ---------- */
 /* ---------- Library ---------- */
-let lib = { q: '', topic: '', flagged: false }, searchTimer;
+let lib = { q: '', topic: '', filter: 'all', sort: 'topic', selecting: false, sel: new Set() }, searchTimer;
 const status = c => { const s = st.reviews[c.id]; return !s ? 'new' : s.due <= Date.now() ? 'ready' : 'in ' + fmt(s.due - Date.now()) };
+const recallOf = c => { const s = st.reviews[c.id]; return s ? retrievability((Date.now() - s.last) / 864e5, s.s) : null };
+const FILTERS = {
+  all: ['All', () => true],
+  due: ['Ready', c => st.reviews[c.id]?.due <= Date.now()],
+  new: ['New', c => !st.reviews[c.id]],
+  struggling: ['Struggling', c => (st.reviews[c.id]?.lapses || 0) >= 2],
+  flagged: ['⚑ Flagged', c => c.flagged],
+  explained: ['Has explanation', c => !!c.explanation],
+};
+const SORTS = {
+  topic: ['Topic', (a, b) => a.topic.localeCompare(b.topic) || (a.created || 0) - (b.created || 0)],
+  newest: ['Newest', (a, b) => (b.created || 0) - (a.created || 0)],
+  weakest: ['Weakest recall', (a, b) => (recallOf(a) ?? 2) - (recallOf(b) ?? 2)],
+  lapses: ['Most forgotten', (a, b) => (st.reviews[b.id]?.lapses || 0) - (st.reviews[a.id]?.lapses || 0)],
+  due: ['Due soonest', (a, b) => (st.reviews[a.id]?.due ?? Infinity) - (st.reviews[b.id]?.due ?? Infinity)],
+};
+
+// Apply a change to many cards: locally at once, then one bulk request.
+function bulk(ids, body) {
+  for (const id of ids) {
+    const c = st.cards[id]; if (!c) continue;
+    if (body.delete) { delete st.cards[id]; delete st.reviews[id]; st.outbox = st.outbox.filter(o => o.id !== id) }
+    if (body.topic) c.topic = body.topic;
+    if ('flagged' in body) c.flagged = body.flagged ? 1 : 0;
+    if (body.reset) { delete st.reviews[id]; st.outbox = st.outbox.filter(o => o.id !== id) }
+  }
+  // Cards still waiting to upload are simply changed (or dropped) in the queue.
+  const queued = new Set(st.pending.map(p => p.id));
+  if (body.delete) st.pending = st.pending.filter(p => !ids.includes(p.id));
+  else st.pending.forEach(p => { if (ids.includes(p.id) && body.topic) p.topic = body.topic });
+  const live = ids.filter(id => !queued.has(id) || !body.delete);
+  if (live.length) st.ops.push({ kind: 'bulk', ids: live, body });
+  save(); merge(); sync();
+}
+
 function library() {
   round = null; view = 'library';
   const q = lib.q.toLowerCase();
   if (lib.topic && !deck.some(c => inTopic(c, lib.topic))) lib.topic = '';
-  const flaggedAll = deck.filter(c => c.flagged);
-  if (lib.flagged && !flaggedAll.length) lib.flagged = false;
-  const cs = deck.filter(c => inTopic(c, lib.topic) && (!lib.flagged || c.flagged) && (!q || (c.q + '\n' + c.a).toLowerCase().includes(q))).sort((a, b) => a.topic.localeCompare(b.topic));
+  const scoped = deck.filter(c => inTopic(c, lib.topic) && (!q || (c.q + '\n' + c.a + '\n' + (c.explanation || '')).toLowerCase().includes(q)));
+  const counts = Object.fromEntries(Object.entries(FILTERS).map(([k, [, f]]) => [k, scoped.filter(f).length]));
+  if (lib.filter !== 'all' && !counts[lib.filter]) lib.filter = 'all';
+  const cs = scoped.filter(FILTERS[lib.filter][1]).sort(SORTS[lib.sort][1]);
+  // Only cards on screen can stay selected, so a bulk action never touches hidden cards.
+  const shown = new Set(cs.map(c => c.id));
+  for (const id of lib.sel) if (!shown.has(id)) lib.sel.delete(id);
+  const grouped = lib.sort === 'topic';
   let html = '', last = null;
   for (const c of cs.slice(0, 400)) {
-    if (c.topic !== last) { last = c.topic; html += `<div class="group"><span>${esc(c.topic)}</span><button class="chip" data-rename="${esc(c.topic)}">Rename</button></div>` }
-    html += `<button class="row" data-id="${c.id}"><div><div class="serif">${md(c.q.replace(/\s*\n\s*/g, ' '))}</div><small>${md(c.a.replace(/\s*\n\s*/g, ' '))}</small></div><span>${c.flagged ? '<b class="fl">⚑</b> ' : ''}${status(c)}</span></button>`;
+    if (grouped && c.topic !== last) { last = c.topic; html += `<div class="group"><span>${esc(c.topic)}</span>${lib.selecting ? '' : `<button class="chip" data-rename="${esc(c.topic)}">Rename</button>`}</div>` }
+    const on = lib.sel.has(c.id), r = recallOf(c), lapses = st.reviews[c.id]?.lapses || 0;
+    html += `<button class="row ${lib.selecting ? 'pick' : ''} ${on ? 'on' : ''}" data-id="${c.id}">
+      ${lib.selecting ? `<i class="tick" aria-hidden="true">${on ? '✓' : ''}</i>` : ''}
+      <div><div class="serif">${md(c.q.replace(/\s*\n\s*/g, ' '))}</div><small>${md(c.a.replace(/\s*\n\s*/g, ' '))}</small>${grouped ? '' : `<small class="tp">${esc(c.topic)}</small>`}</div>
+      <span>${c.flagged ? '<b class="fl">⚑</b> ' : ''}${status(c)}${r != null ? `<br><em>${Math.round(r * 100)}%${lapses ? ` · ${lapses}×` : ''}</em>` : ''}</span></button>`;
   }
+  const n = lib.sel.size;
   app.innerHTML = `
-    <div class="bar"><button class="x" aria-label="Back">←</button><div class="serif" style="flex:1;font-size:22px">Library</div><small style="color:var(--muted)">${cs.length} card${cs.length === 1 ? '' : 's'}</small><button class="chip" id="import">Paste</button></div>
-    <input id="search" type="search" placeholder="Search questions and answers" value="${esc(lib.q)}">
-    <div class="chips" style="margin:12px 0 4px"><button class="chip ${lib.topic || lib.flagged ? '' : 'on'}" data-f="">All</button>${flaggedAll.length ? `<button class="chip ${lib.flagged ? 'on' : ''}" id="flagged">⚑ Flagged ${flaggedAll.length}</button>` : ''}${topics().map(t => `<button class="chip ${t === lib.topic ? 'on' : ''}" data-f="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-    ${lib.flagged ? `<div class="flagbar"><button class="btn" id="copyflag">Copy for rewrite</button><button class="btn ghost" id="delflag">Delete all</button></div>
-      <p class="sub" style="margin:0 4px 6px">Copy gives an agent these cards and the card-writing rules. Paste its rewrite back in (Paste), then delete the originals here.</p>` : ''}
+    <div class="bar"><button class="x" aria-label="Back">←</button><div class="serif" style="flex:1;font-size:22px">Library</div>
+      <button class="chip ${lib.selecting ? 'on' : ''}" id="select">${lib.selecting ? 'Done' : 'Select'}</button>${lib.selecting ? '' : '<button class="chip" id="import">Paste</button>'}</div>
+    <input id="search" type="search" placeholder="Search questions, answers, explanations" value="${esc(lib.q)}">
+    <div class="chips" style="margin:12px 0 0"><button class="chip ${lib.topic ? '' : 'on'}" data-f="">All topics</button>${topics().map(t => `<button class="chip ${t === lib.topic ? 'on' : ''}" data-f="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <div class="chips" style="margin:8px 0 0">${Object.entries(FILTERS).filter(([k]) => k === 'all' || counts[k]).map(([k, [label]]) => `<button class="chip ${lib.filter === k ? 'on' : ''}" data-filter="${k}">${label} <b>${counts[k]}</b></button>`).join('')}</div>
+    <div class="libmeta"><span>${cs.length} card${cs.length === 1 ? '' : 's'}${cs.length > 400 ? ' · showing 400' : ''}</span>
+      <label>Sort <select id="sort">${Object.entries(SORTS).map(([k, [label]]) => `<option value="${k}" ${lib.sort === k ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div>
+    ${lib.selecting ? `<div class="selrow"><button class="chip" id="selall">Select all ${cs.length}</button>${n ? '<button class="chip" id="selnone">Clear</button>' : ''}<span>${n} selected</span></div>` : ''}
     <div class="list">${html || '<p class="empty">No cards match.</p>'}</div>
-    <button class="fab" aria-label="Add a card">+</button>`;
+    ${lib.selecting ? `<div class="dock bulkdock"><div><div class="bulk">
+        <button data-act="move" ${n ? '' : 'disabled'}>Move</button>
+        <button data-act="flag" ${n ? '' : 'disabled'}>⚑ Flag</button>
+        <button data-act="unflag" ${n ? '' : 'disabled'}>Unflag</button>
+        <button data-act="copy" ${n ? '' : 'disabled'}>Copy</button>
+        <button data-act="rewrite" ${n ? '' : 'disabled'}>Copy for rewrite</button>
+        <button data-act="reset" ${n ? '' : 'disabled'}>Reset progress</button>
+        <button data-act="delete" class="danger" ${n ? '' : 'disabled'}>Delete</button>
+      </div></div></div>` : '<button class="fab" aria-label="Add a card">+</button>'}`;
   app.querySelector('.x').onclick = goBack;
   const s = document.getElementById('search');
   s.oninput = () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { lib.q = s.value; const pos = s.selectionStart; library(); const n = document.getElementById('search'); n.focus(); n.setSelectionRange(pos, pos) }, 150);
   };
-  app.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { lib.topic = b.dataset.f; lib.flagged = false; library() });
-  document.getElementById('flagged')?.addEventListener('click', () => { lib.flagged = !lib.flagged; lib.topic = ''; library() });
-  document.getElementById('copyflag')?.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(rewritePrompt(cs)); toast(`Copied ${cs.length} card${cs.length === 1 ? '' : 's'} for a rewrite`) } catch { toast('Couldn’t copy') }
+  app.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { lib.topic = b.dataset.f; library() });
+  app.querySelectorAll('[data-filter]').forEach(b => b.onclick = () => { lib.filter = b.dataset.filter; library() });
+  document.getElementById('sort').onchange = e => { lib.sort = e.target.value; library() };
+  document.getElementById('select').onclick = () => { lib.selecting = !lib.selecting; lib.sel.clear(); library() };
+  document.getElementById('import')?.addEventListener('click', openImport);
+  document.getElementById('selall')?.addEventListener('click', () => { cs.forEach(c => lib.sel.add(c.id)); library() });
+  document.getElementById('selnone')?.addEventListener('click', () => { lib.sel.clear(); library() });
+  app.querySelectorAll('[data-id]').forEach(b => b.onclick = () => {
+    if (!lib.selecting) return openEditor(st.cards[b.dataset.id]);
+    lib.sel.has(b.dataset.id) ? lib.sel.delete(b.dataset.id) : lib.sel.add(b.dataset.id);
+    const keep = scrollY; library(); scrollTo(0, keep);
   });
-  const delAll = document.getElementById('delflag');
-  delAll?.addEventListener('click', () => {
-    if (!delAll.dataset.armed) { delAll.dataset.armed = 1; delAll.textContent = `Tap again to delete ${cs.length}`; delAll.style.color = '#e4a08d'; return }
-    cs.forEach(deleteCard); toast(`Deleted ${cs.length} card${cs.length === 1 ? '' : 's'}`); library();
-  });
-  app.querySelectorAll('[data-id]').forEach(b => b.onclick = () => openEditor(st.cards[b.dataset.id]));
   app.querySelectorAll('[data-rename]').forEach(b => b.onclick = () => renameTopic(b.dataset.rename));
-  app.querySelector('.fab').onclick = () => openEditor();
-  document.getElementById('import').onclick = openImport;
+  app.querySelector('.fab')?.addEventListener('click', () => openEditor());
+  app.querySelectorAll('[data-act]').forEach(b => b.onclick = () => bulkAction(b.dataset.act, b));
+}
+
+async function bulkAction(act, btn) {
+  const ids = [...lib.sel], cards = ids.map(id => st.cards[id]).filter(Boolean), n = ids.length, many = `${n} card${n === 1 ? '' : 's'}`;
+  // Destructive actions need a second tap.
+  if ((act === 'delete' || act === 'reset') && !btn.dataset.armed) {
+    btn.dataset.armed = 1; btn.textContent = act === 'delete' ? `Delete ${many}?` : `Reset ${many}?`; btn.classList.add('danger'); return;
+  }
+  if (act === 'move') return moveSheet(ids);
+  if (act === 'copy' || act === 'rewrite') {
+    const text = act === 'copy' ? JSON.stringify({ cards: cards.map(c => ({ topic: c.topic, q: c.q, a: c.a, ...(c.explanation ? { explanation: c.explanation } : {}) })) }, null, 1) : rewritePrompt(cards);
+    try { await navigator.clipboard.writeText(text); toast(`Copied ${many}`) } catch { toast('Couldn’t copy') }
+    return;
+  }
+  bulk(ids, act === 'delete' ? { delete: true } : act === 'reset' ? { reset: true } : { flagged: act === 'flag' });
+  toast({ delete: `Deleted ${many}`, reset: `Reset progress on ${many}`, flag: `Flagged ${many}`, unflag: `Unflagged ${many}` }[act]);
+  if (act === 'delete') lib.sel.clear();
+  library();
+}
+
+function moveSheet(ids) {
+  let to = '';
+  const paint = () => {
+    sheet.innerHTML = `<form>
+      <div style="display:flex;justify-content:space-between;align-items:center"><span class="serif" style="font-size:20px">Move ${ids.length} card${ids.length === 1 ? '' : 's'}</span><button type="button" class="chip" data-close>Cancel</button></div>
+      <div class="chips" style="flex-wrap:wrap">${topics().map(t => `<button type="button" class="chip ${t === to ? 'on' : ''}" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+      <input name="to" placeholder="Or a new topic, e.g. Languages › Spanish" value="${esc(to)}">
+      <button class="btn">Move</button></form>`;
+    const f = sheet.querySelector('form');
+    sheet.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { to = b.dataset.t; paint() });
+    f.onsubmit = e => {
+      e.preventDefault();
+      const topic = normTopic(f.to.value || to);
+      if (!topic) return toast('Pick or type a topic');
+      bulk(ids, { topic }); lib.sel.clear(); toast(`Moved to ${topic}`); goBack();
+    };
+  };
+  paint(); openSheet();
+  sheet.onclick = e => { if (e.target === sheet || e.target.dataset.close != null) goBack() };
 }
 const refresh = () => view === 'library' ? library() : view === 'stats' ? showStats() : view === 'map' ? showMap() : home();
 function addLink(topic, requires) { st.links.push({ topic, requires }); st.ops.push({ kind: 'link', topic, requires }) }

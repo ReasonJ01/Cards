@@ -234,10 +234,28 @@ select { width: 100%; font: inherit; font-size: 15px; color: var(--ink); backgro
 /* Flagging */
 .bar .flag { color: var(--muted); font-size: 18px; padding: 4px 8px; border-radius: 10px }
 .bar .flag.on { color: #e4a08d; background: #e4a08d22 }
-.flagbar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0 8px }
 .row .fl { color: #e4a08d; font-weight: 400 }
 
 /* Explanation, shown after the answer */
 .card .ex { font-size: 15px; line-height: 1.5; color: var(--muted); text-align: left; padding: 14px 16px; background: #0b241966; border-radius: 14px; animation: fade .3s }
 .card .ex code { font-size: .9em }
 .xbox { min-height: 60px; font-size: 15px }
+
+/* Library: filters, sort, selection, bulk actions */
+.chip b { font-weight: 600; margin-left: 3px; opacity: .8 }
+.libmeta { display: flex; justify-content: space-between; align-items: center; margin: 12px 4px 4px; color: var(--muted); font-size: 13px }
+.libmeta select { width: auto; padding: 6px 10px; font-size: 13px; border-radius: 10px; margin-left: 6px }
+.selrow { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px }
+.selrow span { color: var(--muted); font-size: 13px; margin-left: auto }
+.row.pick { align-items: center }
+.row .tick { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--muted); display: grid; place-items: center; font-style: normal; font-size: 13px; color: var(--bg) }
+.row.on { background: var(--raised); box-shadow: inset 0 0 0 1px var(--brass) }
+.row.on .tick { background: var(--brass); border-color: var(--brass) }
+.row .tp { color: var(--brass-hi); opacity: .8; font-size: 11px }
+.row > span em { font-style: normal; font-size: 11px; opacity: .8 }
+.bulkdock .bulk { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px }
+.bulk button { flex: none; padding: 12px 14px; border-radius: 14px; background: var(--raised); font-size: 14px; font-weight: 600; white-space: nowrap }
+.bulk button:disabled { opacity: .4 }
+.bulk button.danger { color: #e4a08d }
+.row.pick > div { flex: 1 }
+.bulkdock { background: var(--bg); border-top: 1px solid var(--line); padding-top: 10px }
