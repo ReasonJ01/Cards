@@ -127,6 +127,7 @@ it plain otherwise.
 
 - `public/`: the app (static, mobile-first). `fsrs.js` is the scheduler,
   `app.js` the UI, `stats.js` the statistics page,
-  `map.js` the knowledge map, `paste.js` the paste-import parser.
+  `map.js` the knowledge map, `paste.js` the paste-import parser,
+  `rewards.js` every XP, luck and streak number (rewards never depend on the grade).
 - `src/worker.js`: the API and asset serving (a Cloudflare Worker).
 - `migrations/`: the D1 schema. Deployed with `npx wrangler deploy`.

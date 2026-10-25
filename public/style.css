@@ -259,3 +259,40 @@ select { width: 100%; font: inherit; font-size: 15px; color: var(--ink); backgro
 .bulk button.danger { color: #e4a08d }
 .row.pick > div { flex: 1 }
 .bulkdock { background: var(--bg); border-top: 1px solid var(--line); padding-top: 10px }
+
+/* ---- Reward loop ---- */
+.streak { display: grid; justify-items: end; line-height: 1.1 }
+.streak .flame { font: 600 24px Fraunces, serif; color: var(--muted) }
+.streak .flame.lit { color: var(--brass-hi); text-shadow: 0 0 18px #e8c98766 }
+.streak small { color: var(--muted); font-size: 11px; letter-spacing: .04em }
+.hook { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: -14px 0 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px }
+.hook + .hook { margin-top: -14px }
+.hook > div { flex: 1 } .hook b { display: block; font-weight: 600; font-size: 15px } .hook small { color: var(--muted); font-size: 13px }
+.hook small b { display: inline; color: var(--brass-hi); font-size: inherit }
+.hook .go { flex: none; padding: 10px 16px; border-radius: 999px; background: var(--brass); color: var(--bg); font-weight: 600 }
+.hook.risk { border-color: #e4a08d; background: linear-gradient(135deg, #3a2a1f, var(--surface)); animation: pulse 2s ease-in-out infinite }
+.hook.risk b { color: #f0b9a8 }
+.hook.happy { border-color: var(--brass); background: linear-gradient(135deg, #3a3218, var(--surface)) } .hook.happy b { color: var(--brass-hi) }
+.hook.soft { padding: 9px 14px; background: none }
+@keyframes pulse { 50% { box-shadow: 0 0 0 4px #e4a08d22 } }
+.strip { display: flex; justify-content: space-between; align-items: center; gap: 8px; height: 22px; font-size: 12px; color: var(--muted); letter-spacing: .04em; font-variant-numeric: tabular-nums }
+.strip b { color: var(--brass-hi) }
+.strip .combo { height: auto }
+.strip .happy { color: var(--bg); background: var(--brass); padding: 2px 8px; border-radius: 999px; font-weight: 600 }
+.float.crit { font-size: 30px; color: #fff3cf; text-shadow: 0 0 24px #e8c987 }
+.float.x5 { font-size: 38px } .float.x25 { font-size: 48px; color: #ffe08a }
+.burst { position: fixed; inset: 0; display: grid; place-content: center; text-align: center; z-index: 30; pointer-events: none; background: #0b2419d9; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: burst 2.6s ease forwards }
+.burst b { font: 600 44px Fraunces, serif; color: var(--brass-hi); text-shadow: 0 0 40px #c9a35a88 }
+.burst small { color: var(--ink); font-size: 16px; margin-top: 6px }
+@keyframes burst { 0% { opacity: 0; transform: scale(.7) } 12% { opacity: 1; transform: scale(1.06) } 20% { transform: scale(1) } 80% { opacity: 1 } 100% { opacity: 0 } }
+.slot { position: relative; display: grid; grid-template-columns: repeat(3, 72px); gap: 8px; margin: 18px 0 8px; padding: 10px; border-radius: 22px; background: radial-gradient(circle at 50% 30%, #2a5a46, var(--surface)); border: 1px solid var(--brass) }
+.reel { height: 150px; overflow: hidden; display: grid; grid-template-rows: repeat(3, 1fr); place-items: center; background: var(--bg); border-radius: 14px }
+.reel i { font-style: normal; font-size: 30px; color: var(--muted); opacity: .45 }
+.reel i:nth-child(2) { color: var(--brass-hi); opacity: 1; font-size: 38px }
+.reel i.tease { color: var(--brass-hi); opacity: .9; text-shadow: 0 0 14px #e8c987 }
+.reel.spin i { filter: blur(1.5px); animation: jiggle .09s linear infinite }
+@keyframes jiggle { 50% { transform: translateY(6px) } }
+.payline { position: absolute; left: 6px; right: 6px; top: 50%; border-top: 1px solid #c9a35a66; pointer-events: none }
+.slot.win { box-shadow: 0 0 30px #c9a35a55 } .slot.win-big { box-shadow: 0 0 60px #e8c987aa; animation: pop .5s }
+.dock button[hidden] { display: none }
+@media (prefers-reduced-motion: reduce) { .hook.risk { animation: none } }

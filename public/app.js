@@ -3,14 +3,14 @@ import { stats } from './stats.js';
 import { map } from './map.js';
 import { parsePaste, normTopic, normQ } from './paste.js';
 import { checkLink } from './dag.js';
+import * as R$ from './rewards.js';
 
 const KEY = 'bloom-v2', ROUND = 10, NEW_PER_DAY = 15, GILD_CHANCE = 1 / 12;
-const XP = { 1: 4, 2: 8, 3: 10, 4: 12 };
 const app = document.getElementById('app'), sheet = document.getElementById('sheet');
 
 let st;
 try { st = JSON.parse(localStorage.getItem(KEY)) } catch {}
-st = { cards: {}, reviews: {}, outbox: [], pending: [], ops: [], links: [], since: 0, xp: 0, streak: 0, lastDay: null, newDay: null, newCount: 0, ...st };
+st = { cards: {}, reviews: {}, outbox: [], pending: [], ops: [], links: [], since: 0, xp: 0, streak: 0, lastDay: null, newDay: null, newCount: 0, pot: R$.POT_START, freezes: 0, wager: null, goalDay: null, goalCount: 0, goalPaid: false, ...st };
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)) } catch {} };
 
 /* ---------- Server ---------- */
@@ -21,7 +21,7 @@ async function api(path, opts = {}) {
   if (!res.ok) throw Object.assign(new Error((await res.json().catch(() => ({}))).error || res.status), { status: res.status });
   return res.json();
 }
-const STATS = ['xp', 'streak', 'lastDay', 'newDay', 'newCount'];
+const STATS = ['xp', 'streak', 'lastDay', 'newDay', 'newCount', 'pot', 'freezes', 'wager', 'goalDay', 'goalCount', 'goalPaid'];
 const statsOf = () => Object.fromEntries(STATS.map(k => [k, st[k]]));
 // Writes are optimistic: they land in local state at once and queue here.
 // sync() drains the queues in order (new cards before reviews of them) and
@@ -114,8 +114,42 @@ function countUp(el, from, to, ms = 600, show = n => n) {
 const later = (fn, ms) => still.matches ? fn() : setTimeout(fn, ms);
 let homeXp = null;
 
+// Home banners: streak at risk, daily goal, happy hour, streak wager.
+function hooks() {
+  const now = new Date(), today = day(), hh = R$.happyHour(today), studied = st.lastDay === today;
+  const goal = st.goalDay === today ? st.goalCount : 0, left = R$.DAILY_GOAL - goal, out = [];
+  if (st.streak && !studied && daysBetween(st.lastDay, today) === 1 && now.getHours() >= 18) {
+    const h = 23 - now.getHours(), m = 59 - now.getMinutes();
+    out.push(`<div class="hook risk"><div><b>Your ${st.streak}-day streak ends at midnight</b><small>${h}h ${m}m left. One card saves it${st.freezes ? `, or a ❄ freeze will` : ''}.</small></div><button class="go" id="save-streak">Save it</button></div>`);
+  }
+  if (now.getHours() === hh) out.push(`<div class="hook happy"><div><b>Happy hour: double XP</b><small>${59 - now.getMinutes()} minutes left</small></div></div>`);
+  else if (now.getHours() < hh) out.push(`<div class="hook soft"><small>Double XP today at <b>${String(hh).padStart(2, '0')}:00</b></small></div>`);
+  const C = 2 * Math.PI * 14, p = Math.min(1, goal / R$.DAILY_GOAL);
+  out.push(`<div class="hook goal"><svg width="36" height="36"><circle cx="18" cy="18" r="14" fill="none" stroke="#ffffff14" stroke-width="4"/><circle cx="18" cy="18" r="14" fill="none" stroke="#c9a35a" stroke-width="4" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - p)}" transform="rotate(-90 18 18)"/></svg>
+    <div><b>${left <= 0 ? 'Daily goal closed' : `${goal} of ${R$.DAILY_GOAL} today`}</b><small>${left <= 0 ? `+${R$.GOAL_BONUS} xp banked. Everything now is extra.` : left <= 5 ? `Just ${left} more to close your ring (+${R$.GOAL_BONUS} xp)` : `${left} more to close your ring (+${R$.GOAL_BONUS} xp)`}</small></div></div>`);
+  if (st.wager) out.push(`<div class="hook soft"><small>Wager: day <b>${Math.min(R$.WAGER.days, st.streak - st.wager.startStreak)}</b> of ${R$.WAGER.days}. Keep the streak to win <b>${st.wager.payout} xp</b>.</small></div>`);
+  else if (st.streak >= 1 && st.xp >= R$.WAGER.stake + levelStart(levelOf(st.xp))) out.push(`<div class="hook"><div><b>Double or nothing?</b><small>Bet ${R$.WAGER.stake} xp you'll keep your streak ${R$.WAGER.days} more days. Win ${R$.WAGER.payout}.</small></div><button class="go" id="wager">Bet</button></div>`);
+  return out.join('');
+}
+
 function toast(t) { document.querySelector('.toast')?.remove(); const e = Object.assign(document.createElement('div'), { className: 'toast', textContent: t }); document.body.append(e); setTimeout(() => e.remove(), 1600) }
-function float(t) { const e = Object.assign(document.createElement('div'), { className: 'float', textContent: t }); document.body.append(e); setTimeout(() => e.remove(), 1000) }
+function float(t, cls = '') { const e = Object.assign(document.createElement('div'), { className: 'float ' + cls, textContent: t }); document.body.append(e); setTimeout(() => e.remove(), cls ? 1400 : 1000) }
+// A centre-screen moment for big events: jackpots, milestones, goals.
+function celebrate(title, sub) {
+  const e = Object.assign(document.createElement('div'), { className: 'burst' });
+  e.innerHTML = `<b></b><small></small>`; e.querySelector('b').textContent = title; e.querySelector('small').textContent = sub || '';
+  document.body.append(e); setTimeout(() => e.remove(), 2600);
+}
+const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+function streakEvent(ev) {
+  if (ev.type === 'daily') { st.xp += ev.bonus; if (round) round.xp += ev.bonus; later(() => celebrate(`Day ${st.streak}`, `Daily bonus +${ev.bonus} xp`), 300) }
+  if (ev.type === 'milestone') later(() => celebrate(`${ev.days}-day streak`, 'Keep it alive'), 2900);
+  if (ev.type === 'freeze') toast(`❄ Streak freeze used, ${st.streak}-day streak saved`);
+  if (ev.type === 'freeze-earned') later(() => toast('❄ You earned a streak freeze'), 1500);
+  if (ev.type === 'wager-won') later(() => celebrate('Wager won', `+${ev.payout} xp`), 2900);
+  if (ev.type === 'wager-lost') toast(`Wager lost (${ev.stake} xp)`);
+  if (ev.type === 'reset') toast(`Your ${ev.was}-day streak ended. Day 1 starts now.`);
+}
 
 /* ---------- Home ---------- */
 let view = 'home';
@@ -166,8 +200,9 @@ function home() {
     <div class="top">
       <div class="ring"><svg width="58" height="58"><circle cx="29" cy="29" r="25" fill="none" stroke="#ffffff14" stroke-width="4"/><circle cx="29" cy="29" r="25" fill="none" stroke="#c9a35a" stroke-width="4" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - p0)}" id="ring"/></svg><b>${L}</b></div>
       <div class="who"><div class="serif" style="font-size:20px">Level ${L}</div><small><span id="lvxp">${from - levelStart(L)}</span> / ${span} xp</small></div>
-      ${st.streak ? `<div class="streak">${st.streak} day${st.streak > 1 ? 's' : ''}</div>` : ''}
+      ${st.streak ? `<div class="streak"><span class="flame ${st.lastDay === day() ? 'lit' : ''}">${st.streak}</span><small>day streak${st.freezes ? ` · ❄${st.freezes}` : ''}</small></div>` : ''}
     </div>
+    ${hooks()}
     ${all.total ? `<button class="hero" data-t=""><div class="label" style="margin:0 0 8px">Everything</div><h2 class="serif">${all.total} ready</h2><small class="label" style="text-transform:none;letter-spacing:0;font-size:14px">A round is ${Math.min(ROUND, all.total)} card${Math.min(ROUND, all.total) > 1 ? 's' : ''}. Stop whenever.</small><div><span class="go">Play a round</span></div></button>`
       : `<div class="hero"><h2 class="serif">All caught up</h2><small style="color:var(--muted)">${deck.length ? 'Nothing is due. Come back later, add something new, or get ahead on the cards you’re closest to forgetting.' : 'No cards yet — tap + to add your first.'}</small>${ahead('').length ? '<div><button class="go" id="ahead">Review ahead</button></div>' : ''}</div>`}
     ${rows ? `<div class="label">Focus on a topic</div>${rows}` : ''}
@@ -180,6 +215,11 @@ function home() {
   countUp(document.getElementById('lvxp'), from - levelStart(L), st.xp - levelStart(L), 800);
   app.querySelectorAll('[data-t]').forEach(b => b.onclick = () => start(b.dataset.t));
   document.getElementById('ahead')?.addEventListener('click', () => start('', false, true));
+  document.getElementById('save-streak')?.addEventListener('click', () => start('', false, !ready().total));
+  document.getElementById('wager')?.addEventListener('click', () => {
+    st.xp -= R$.WAGER.stake; st.wager = { stake: R$.WAGER.stake, payout: R$.WAGER.payout, startStreak: st.streak };
+    save(); sync(); toast(`Bet placed: ${R$.WAGER.days} more days wins ${R$.WAGER.payout} xp`); home();
+  });
   app.querySelectorAll('[data-tog]').forEach(b => b.onclick = () => {
     const t = b.dataset.tog; open.has(t) ? open.delete(t) : open.add(t);
     try { localStorage.setItem('bloom-open', JSON.stringify([...open])) } catch {}
@@ -217,6 +257,7 @@ function start(topic, replace, early) {
   const chosen = !!topic || !!early, q = buildQueue(topic, chosen);
   if (!q.length) return toast(topic ? 'No cards in this topic yet' : 'Nothing ready');
   nav({ v: 'study' }, replace);
+  view = 'study';
   round = { shown: 0, pct: 0, topic, chosen, queue: q, size: q.length, done: 0, xp: 0, combo: 0, best: 0, right: 0, startLevel: levelOf(st.xp), again: new Set() };
   next();
 }
@@ -230,7 +271,7 @@ function draw() {
   const iv = round.flipped ? preview(s || {}, Date.now()) : [];
   app.innerHTML = `
     <div class="bar"><button class="x" aria-label="End round">×</button><div class="progress"><i style="width:${round.pct || 0}%"></i></div><button class="flag ${c.flagged ? 'on' : ''}" aria-label="Flag this card as poorly written" aria-pressed="${!!c.flagged}">⚑</button><div class="xp">${round.shown} xp</div></div>
-    <div class="combo ${round.combo >= 3 ? 'on' : ''}">COMBO ×${mult().toFixed(1)}</div>
+    <div class="strip"><span>Goal ${Math.min(st.goalDay === day() ? st.goalCount : 0, R$.DAILY_GOAL)}/${R$.DAILY_GOAL}</span><span class="combo ${round.combo >= 3 ? 'on' : ''}">MOMENTUM ×${mult().toFixed(2)}</span>${R$.isHappy(day()) ? '<span class="happy">2× HAPPY HOUR</span>' : ''}<span>Pot <b>${(st.pot || R$.POT_START).toLocaleString()}</b></span></div>
     <div class="card ${round.gilded ? 'gilded' : ''} ${round.flipped ? '' : 'enter'}">
       <div class="t">${round.gilded ? 'Gilded · ×5 xp' : esc(c.topic)}${!s ? ' · new' : s.due > Date.now() ? ` · ahead, due in ${fmt(s.due - Date.now())}` : ''}</div>
       <div class="q serif">${md(c.q)}</div>
@@ -250,7 +291,7 @@ function draw() {
   app.querySelector('.card').onclick = () => { if (!round.flipped) { round.flipped = true; draw() } };
   app.querySelectorAll('[data-g]').forEach(b => b.onclick = () => grade(+b.dataset.g));
 }
-const mult = () => 1 + Math.min(round.combo, 10) * 0.1;
+const mult = () => R$.momentum(round.combo);
 
 function grade(g) {
   if (round.busy) return;
@@ -258,18 +299,25 @@ function grade(g) {
   st.reviews[c.id] = review(st.reviews[c.id] || {}, g);
   st.outbox.push({ id: c.id, grade: g, ts: Date.now(), state: st.reviews[c.id] });
   if (wasNew) { newLeft(); st.newCount++ }
-  round.combo = g === 1 ? 0 : round.combo + 1;
+  // Momentum counts reviews in a row, right or wrong: grading honestly never costs you.
+  round.combo++;
   round.best = Math.max(round.best, round.combo);
-  const gain = Math.round(XP[g] * (g > 1 ? mult() : 1) * (round.gilded ? 5 : 1));
+  const today = day();
+  for (const ev of R$.extendStreak(st, today, daysBetween)) streakEvent(ev);
+  if (st.goalDay !== today) { st.goalDay = today; st.goalCount = 0; st.goalPaid = false }
+  st.goalCount++;
+  if (st.goalCount >= R$.DAILY_GOAL && !st.goalPaid) { st.goalPaid = true; st.xp += R$.GOAL_BONUS; round.xp += R$.GOAL_BONUS; celebrate('Daily goal closed', `+${R$.GOAL_BONUS} xp`) }
+  st.pot = (st.pot || R$.POT_START) + R$.POT_GROWTH;
+  const cr = R$.crit(), happy = R$.isHappy(today);
+  let gain = Math.round(R$.BASE_XP * mult() * (cr ? cr.x : 1) * (round.gilded ? 5 : 1) * (happy ? 2 : 1));
+  if (Math.random() < R$.POT_ODDS) { gain += st.pot; celebrate('JACKPOT', `The pot pays +${st.pot.toLocaleString()} xp`); st.pot = R$.POT_START }
   round.xp += gain; st.xp += gain;
-  float(`+${gain}`);
+  float(cr ? `${cr.label} +${gain}` : `+${gain}`, cr ? 'crit x' + cr.x : '');
   round.queue.shift();
   // A missed card comes back once at the end of the round, so you finish on a win.
   if (g === 1 && !round.again.has(c.id)) { round.again.add(c.id); round.queue.push(c); round.size++ }
   else if (g > 1) round.right++;
   round.done++;
-  const t = day();
-  if (st.lastDay !== t) { st.streak = st.lastDay === day(Date.now() - 864e5) ? st.streak + 1 : 1; st.lastDay = t }
   save(); sync();
   round.busy = true;
   app.querySelector('.card').classList.add('leave');
@@ -277,39 +325,66 @@ function grade(g) {
   later(() => { round.busy = false; next() }, 170);
 }
 
-// Variable reward: most draws are modest, a few are big, rarely a jackpot.
-function draw_bonus() {
-  const r = Math.random();
-  if (r < .01) return [500, 'Jackpot'];
-  if (r < .10) return [80 + (Math.random() * 70 | 0), 'Lucky'];
-  if (r < .40) return [30 + (Math.random() * 30 | 0), 'Nice'];
-  return [10 + (Math.random() * 15 | 0), 'Bonus'];
-}
+let autoplay;
 function summary() {
-  nav({ v: 'summary' }, true);
-  const R = round, acc = R.done ? Math.round(100 * R.right / R.done) : 0;
+  nav({ v: 'summary' }, true); view = 'summary';
+  const R = round, acc = R.done ? Math.round(100 * R.right / R.done) : 0, goal = st.goalDay === day() ? st.goalCount : 0;
   app.innerHTML = `<div class="summary">
     <div class="label" style="margin:0">Round complete</div>
     <h2 class="serif">${acc >= 90 ? 'Superb' : acc >= 70 ? 'Well played' : 'Good work'}</h2>
-    <div class="stat"><div><b data-to="${R.xp}">0</b><small class="label">xp</small></div><div><b data-to="${acc}" data-pct>0%</b><small class="label">recalled</small></div><div><b data-to="${R.best}">0</b><small class="label">best combo</small></div></div>
-    <button class="chest" id="chest">?</button><small id="cap" style="color:var(--muted)">Tap to draw your bonus</small>
+    <div class="stat"><div><b data-to="${R.xp}">0</b><small class="label">xp</small></div><div><b data-to="${acc}" data-pct>0%</b><small class="label">recalled</small></div><div><b data-to="${R.best}">0</b><small class="label">momentum</small></div></div>
+    <p class="sub" style="margin:0">${goal >= R$.DAILY_GOAL ? 'Daily goal closed ✓' : `${R$.DAILY_GOAL - goal} more to close today's goal`} · ${st.streak}-day streak${st.freezes ? ` · ❄${st.freezes}` : ''}</p>
+    <div class="slot" id="slot">${[0, 1, 2].map(i => `<div class="reel" data-r="${i}"><i>◆</i><i>★</i><i>●</i></div>`).join('')}<div class="payline"></div></div>
+    <small id="cap" style="color:var(--muted)">Pot ${(st.pot || R$.POT_START).toLocaleString()} xp on three ★</small>
     <div id="lvl"></div>
   </div>
-  <div class="dock"><div><button class="btn" id="more" hidden>Another round</button><button class="btn ghost" id="done">Done</button></div></div>`;
+  <div class="dock"><div><button class="btn" id="pull">Pull</button><button class="btn" id="more" hidden>Another round</button><button class="btn ghost" id="done">Done</button></div></div>`;
   app.querySelectorAll('[data-to]').forEach((b, i) => later(() => countUp(b, 0, +b.dataset.to, 700, n => b.dataset.pct != null ? n + '%' : n), 150 + i * 120));
-  const chest = document.getElementById('chest');
-  chest.onclick = () => {
-    if (chest.classList.contains('open')) return;
-    const [n, label] = draw_bonus();
-    st.xp += n; save(); sync();
-    chest.classList.add('open'); countUp(chest, 0, n, n >= 100 ? 1200 : 700, v => '+' + v);
-    document.getElementById('cap').textContent = label;
-    const L = levelOf(st.xp);
-    if (L > R.startLevel) later(() => { const el = document.getElementById('lvl'); if (el) el.innerHTML = `<p class="levelup">Level ${L} reached</p>` }, 800);
-    if (buildQueue(R.topic, R.chosen).length) document.getElementById('more').hidden = false;
+  const pull = document.getElementById('pull'), more = document.getElementById('more'), cap = document.getElementById('cap');
+  pull.onclick = () => {
+    pull.disabled = true; pull.textContent = 'Spinning…';
+    const res = R$.spin(st.pot || R$.POT_START);
+    // Reels spin, then stop left to right; the last one slows right down.
+    const reels = [...app.querySelectorAll('.reel')], stops = still.matches ? [0, 0, 0] : [700, 1250, 2300];
+    const sym = () => R$.SYMBOLS[Math.random() * R$.SYMBOLS.length | 0];
+    reels.forEach((el, i) => {
+      el.classList.add('spin');
+      const tick = setInterval(() => el.querySelectorAll('i').forEach(x => x.textContent = sym()), i === 2 ? 90 : 70);
+      setTimeout(() => {
+        clearInterval(tick); el.classList.remove('spin');
+        const [a, b, c] = el.querySelectorAll('i');
+        b.textContent = res.reels[i]; a.textContent = res.nearMiss && i === 2 ? '★' : sym(); c.textContent = sym();
+        if (res.nearMiss && i === 2) a.classList.add('tease');
+        if (i === 2) payout();
+      }, stops[i]);
+    });
+    function payout() {
+      st.xp += res.xp;
+      if (res.jackpot) { st.pot = R$.POT_START; celebrate('JACKPOT', `+${res.xp.toLocaleString()} xp`) }
+      save(); sync();
+      app.querySelector('.slot').classList.add(res.jackpot ? 'win-big' : res.xp >= 100 ? 'win' : 'done');
+      cap.textContent = `${res.label} · +${res.xp} xp`;
+      pull.hidden = true;
+      const L = levelOf(st.xp);
+      if (L > R.startLevel) later(() => { const el = document.getElementById('lvl'); if (el) el.innerHTML = `<p class="levelup">Level ${L} reached</p>` }, 800);
+      if (buildQueue(R.topic, R.chosen).length) { more.hidden = false; countdown() }
+    }
   };
-  document.getElementById('more').onclick = () => start(R.topic, true, R.chosen);
-  document.getElementById('done').onclick = goBack;
+  // Autoplay: the next round starts by itself unless you stop it.
+  function countdown() {
+    let n = 5;
+    const tick = () => {
+      if (view === 'summary' && round === R && !more.hidden) {
+        if (n === 0) return start(R.topic, true, R.chosen);
+        more.textContent = `Next round in ${n--}…`; autoplay = setTimeout(tick, 1000);
+      }
+    };
+    tick();
+    const stop = () => { clearTimeout(autoplay); more.textContent = 'Another round' };
+    app.querySelector('.summary').addEventListener('click', stop, { once: true });
+  }
+  more.onclick = () => { clearTimeout(autoplay); start(R.topic, true, R.chosen) };
+  document.getElementById('done').onclick = () => { clearTimeout(autoplay); goBack() };
 }
 
 /* ---------- Add ---------- */
