@@ -74,7 +74,7 @@ function render(ctx) {
   if (!daySet.has(d)) d -= DAY;
   while (daySet.has(d)) { current++; d -= DAY }
   const studied = scoped.filter(c => states[c.id]);
-  const recallNow = studied.length ? Math.round(100 * studied.reduce((s, c) => s + retrievability((now - states[c.id].last) / DAY, states[c.id].s), 0) / studied.length) : null;
+  const recallNow = studied.length ? Math.round(100 * studied.reduce((s, c) => s + (ctx.recallOf ? ctx.recallOf(c) : retrievability((now - states[c.id].last) / DAY, states[c.id].s)), 0) / studied.length) : null;
   const added = scoped.filter(c => (c.created ?? 0) >= from).length;
   const newSeen = range.filter(r => r.first).length;
 
@@ -92,11 +92,11 @@ function render(ctx) {
     <section class="panel hero-stat">
       <div class="label0">True retention</div>
       <div class="hero-num">${fmtPct(pct(ok.length, graded.length))}</div>
-      <div class="sub">${graded.length ? `of ${compact(graded.length)} scheduled reviews recalled · target 90%` : 'No scheduled reviews in this range yet. Retention counts reviews at least a day after the last one.'}</div>
+      <div class="sub">${graded.length ? `of ${compact(graded.length)} reviews recalled after ≥1 day · target ${Math.round((ctx.retention ?? 0.9) * 100)}%` : 'No scheduled reviews in this range yet. Retention counts reviews at least a day after the last one.'}</div>
       <div class="tiles">
         ${tile('Young cards', fmtPct(pct(young.filter(r => r.grade > 1).length, young.length)), `interval under ${MATURE}d · ${young.length} reviews`)}
         ${tile('Mature cards', fmtPct(pct(mature.filter(r => r.grade > 1).length, mature.length)), `interval ${MATURE}d+ · ${mature.length} reviews`)}
-        ${tile('Recall right now', fmtPct(recallNow), `predicted average over ${studied.length} studied cards`)}
+        ${tile('Recall right now', fmtPct(recallNow), `${ctx.rwkv ? 'RWKV' : 'FSRS'} average over ${studied.length} studied cards`)}
       </div>
     </section>
 
@@ -110,7 +110,7 @@ function render(ctx) {
     ${panel('Activity', 'Reviews per day', heatmap(range, from, now, W))}
     ${panel('Reviews', spanDays > 120 ? 'Per week' : 'Per day', reviewsChart(range, from, now, spanDays, W))}
     ${panel('Retention over time', 'Weekly share of scheduled reviews recalled', retentionChart(graded, W))}
-    ${panel('Forecast', 'Cards coming due over the next 30 days', forecast(scoped, states, now, W))}
+    ${ctx.rwkv ? '<p class="sub">RWKV recall predictions are shown above. Maturity, stability and difficulty below retain the FSRS baseline; scheduled due dates do not drive RWKV reviews.</p>' : panel('Forecast', 'Cards coming due over the next 30 days', forecast(scoped, states, now, W))}
     ${panel('Card maturity', `${scoped.length} cards`, maturity(groups, W))}
     ${panel('Answer buttons', 'Share of each grade in this range', buttons(range, W))}
     ${panel('Memory strength', 'Cards by stability: days until recall falls to 90%', stability(studied, states, W))}

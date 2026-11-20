@@ -4,6 +4,7 @@ import { map } from './map.js';
 import { parsePaste, normTopic, normQ } from './paste.js';
 import { checkLink } from './dag.js';
 import * as R$ from './rewards.js';
+import { settingsOf, selectCards } from './rwkv-scheduler.js';
 
 const KEY = 'bloom-v2', ROUND = 10, NEW_PER_DAY = 15, GILD_CHANCE = 1 / 12;
 const app = document.getElementById('app'), sheet = document.getElementById('sheet');
@@ -12,6 +13,73 @@ let st;
 try { st = JSON.parse(localStorage.getItem(KEY)) } catch {}
 st = { cards: {}, reviews: {}, outbox: [], pending: [], ops: [], links: [], since: 0, xp: 0, streak: 0, lastDay: null, newDay: null, newCount: 0, pot: R$.POT_START, freezes: 0, wager: null, goalDay: null, goalCount: 0, goalPaid: false, ...st };
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)) } catch {} };
+
+/* ---------- RWKV-Instant (browser-only inference) ---------- */
+let rwkvConfig;
+try { rwkvConfig = settingsOf(JSON.parse(localStorage.getItem('bloom-rwkv-settings') || '{}')) } catch { rwkvConfig = settingsOf() }
+let rwkvScores = null, rwkvMessage = 'loading (FSRS fallback)', rwkvWorker, rwkvRequest = 0;
+const rwkvWaiters = new Map();
+const rwkvActive = () => rwkvConfig.enabled && rwkvScores !== null;
+function mergeHistory(rows) {
+  const merged = new Map((st.rwkvHistory || []).map(r => [JSON.stringify(r.slice(0, 3)), r]));
+  for (const r of rows) merged.set(JSON.stringify(r.slice(0, 3)), r);
+  st.rwkvHistory = [...merged.values()].sort((a, b) => a[1] - b[1]); save();
+}
+function rwkvHistory() {
+  const merged = new Map((st.rwkvHistory || []).map(r => [JSON.stringify(r.slice(0, 3)), r]));
+  for (const r of st.outbox) merged.set(JSON.stringify([r.id, r.ts, r.grade]), [r.id, r.ts, r.grade, r.duration ?? null, r.shown ?? null]);
+  return [...merged.values()].sort((a, b) => a[1] - b[1]);
+}
+const dailyRemaining = () => Math.max(0, rwkvConfig.max - rwkvHistory().filter(r => day(r[1]) === day()).length);
+function failRWKV(message) {
+  rwkvScores = null; rwkvMessage = message + ' · using FSRS';
+  rwkvWorker?.terminate(); rwkvWorker = null;
+  for (const finish of rwkvWaiters.values()) finish(false);
+  rwkvWaiters.clear();
+}
+async function scoreRWKV() {
+  if (!rwkvConfig.enabled) return false;
+  try {
+    if (!rwkvWorker) {
+      rwkvWorker = new Worker(new URL('./rwkv-worker.js', import.meta.url), { type: 'module' });
+      rwkvWorker.onmessage = ({ data }) => {
+        if (data.error) failRWKV('Unavailable');
+        else {
+          rwkvScores = data.scores; rwkvMessage = 'ready';
+          rwkvWaiters.get(data.id)?.(true); rwkvWaiters.delete(data.id);
+        }
+        if (!round && sheet.hidden && view === 'home') home();
+      };
+      rwkvWorker.onerror = () => { failRWKV('Unavailable'); if (!round && sheet.hidden) refresh() };
+    }
+    const id = ++rwkvRequest;
+    return await new Promise(resolve => {
+      const timer = setTimeout(() => failRWKV('Timed out'), 60000);
+      rwkvWaiters.set(id, ok => { clearTimeout(timer); resolve(ok) });
+      rwkvWorker.postMessage({ id, cards: deck.map(c => ({ ...c, reps: st.reviews[c.id]?.reps || 0 })), history: rwkvHistory() });
+    });
+  } catch { failRWKV('Unavailable'); return false }
+}
+function openScheduler() {
+  sheet.innerHTML = `<form><h2 class="serif">Review settings</h2>
+    <label>Scheduler<select name="enabled"><option value="1" ${rwkvConfig.enabled ? 'selected' : ''}>RWKV-Instant</option><option value="0" ${!rwkvConfig.enabled ? 'selected' : ''}>FSRS</option></select></label>
+    <label>Desired retention (%)<input name="retention" type="number" min="70" max="99" value="${Math.round(rwkvConfig.retention * 100)}" required></label>
+    <label>Maximum reviews per day<input name="max" type="number" min="1" max="10000" value="${rwkvConfig.max}" required></label>
+    <label>Minimum reviews per day<input name="min" type="number" min="0" max="10000" value="${rwkvConfig.min}" required></label>
+    <label>Seconds before repeating a card<input name="cooldown" type="number" min="10" max="3600" value="${rwkvConfig.cooldown}" required></label>
+    <small>RWKV chooses lowest estimated recall first, not scheduled dates. Every answer counts towards the daily maximum, including repeats and new cards. A round still ends after 10 answers. Settings apply to this device. Your existing progress is preserved; if RWKV cannot load, FSRS remains available.</small>
+    <small>Inference runs on your device. <a style="color:var(--brass-hi)" href="https://github.com/ReasonJ01/Cards/tree/feat/rwkv-instant-browser">Source code and model notices (AGPL)</a></small>
+    <button class="btn">Save</button><button type="button" class="btn ghost" data-close>Cancel</button></form>`;
+  openSheet();
+  sheet.querySelector('form').onsubmit = e => {
+    e.preventDefault(); const f = e.currentTarget.elements;
+    rwkvConfig = settingsOf({ enabled: f.enabled.value === '1', retention: +f.retention.value / 100, max: +f.max.value, min: +f.min.value, cooldown: +f.cooldown.value });
+    localStorage.setItem('bloom-rwkv-settings', JSON.stringify(rwkvConfig));
+    if (rwkvConfig.enabled) { scoreRWKV(); sync() }
+    goBack();
+  };
+  sheet.querySelector('[data-close]').onclick = goBack;
+}
 
 /* ---------- Server ---------- */
 let apiKey = localStorage.getItem('bloom-key');
@@ -61,7 +129,7 @@ async function syncOnce() {
       } catch (e) { if (e.status !== 404) throw e }
       st.ops.shift(); save();
     }
-    if (st.outbox.length) { const out = st.outbox.slice(); await api('/reviews', { method: 'POST', body: out }); st.outbox = st.outbox.slice(out.length) }
+    while (st.outbox.length) { const out = st.outbox.slice(0, 100); await api('/reviews', { method: 'POST', body: out }); st.outbox = st.outbox.slice(out.length) }
     const r = await api('/sync?since=' + st.since);
     for (const c of r.cards) {
       if (c.deleted) { delete st.cards[c.id]; delete st.reviews[c.id]; continue }
@@ -77,7 +145,14 @@ async function syncOnce() {
     if ((r.stats.xp || 0) > st.xp) Object.assign(st, r.stats);
     st.since = r.cards.length ? Math.max(...r.cards.map(c => c.updated)) : st.since;
     await api('/stats', { method: 'PUT', body: statsOf() });
-    save(); merge(); return true;
+    save(); merge();
+    if (rwkvConfig.enabled) {
+      // Server insertion cursor catches late offline answers with old timestamps.
+      const history = await api('/history?after=' + (st.rwkvCursor || 0));
+      mergeHistory(history.rows); st.rwkvCursor = history.cursor; save();
+      scoreRWKV();
+    }
+    return true;
   } catch { save(); return false }
 }
 
@@ -96,6 +171,12 @@ const levelStart = L => 50 * L * (L - 1);
 function newLeft() { if (st.newDay !== day()) { st.newDay = day(); st.newCount = 0 } return Math.max(0, NEW_PER_DAY - st.newCount) }
 function ready(topic) {
   const now = Date.now(), cs = deck.filter(c => inTopic(c, topic));
+  if (rwkvActive()) {
+    const history = rwkvHistory(), remaining = dailyRemaining();
+    const due = selectCards(cs.filter(c => st.reviews[c.id]), rwkvScores, history, rwkvConfig, now);
+    const fresh = cs.filter(c => !st.reviews[c.id]).slice(0, Math.min(newLeft(), Math.max(0, remaining - due.length)));
+    return { due, fresh, total: due.length + fresh.length };
+  }
   const due = cs.filter(c => st.reviews[c.id]?.due <= now).sort((a, b) => st.reviews[a.id].due - st.reviews[b.id].due);
   const fresh = cs.filter(c => !st.reviews[c.id]).slice(0, newLeft());
   return { due, fresh, total: due.length + fresh.length };
@@ -203,8 +284,9 @@ function home() {
       ${st.streak ? `<div class="streak"><span class="flame ${st.lastDay === day() ? 'lit' : ''}">${st.streak}</span><small>day streak${st.freezes ? ` · ❄${st.freezes}` : ''}</small></div>` : ''}
     </div>
     ${hooks()}
+    <button class="topic" id="scheduler"><span>${rwkvActive() ? 'RWKV-Instant · weakest first' : rwkvConfig.enabled ? 'RWKV: ' + esc(rwkvMessage) : 'FSRS scheduling'}</span><span>Settings</span></button>
     ${all.total ? `<button class="hero" data-t=""><div class="label" style="margin:0 0 8px">Everything</div><h2 class="serif">${all.total} ready</h2><small class="label" style="text-transform:none;letter-spacing:0;font-size:14px">A round is ${Math.min(ROUND, all.total)} card${Math.min(ROUND, all.total) > 1 ? 's' : ''}. Stop whenever.</small><div><span class="go">Play a round</span></div></button>`
-      : `<div class="hero"><h2 class="serif">All caught up</h2><small style="color:var(--muted)">${deck.length ? 'Nothing is due. Come back later, add something new, or get ahead on the cards you’re closest to forgetting.' : 'No cards yet — tap + to add your first.'}</small>${ahead('').length ? '<div><button class="go" id="ahead">Review ahead</button></div>' : ''}</div>`}
+      : `<div class="hero"><h2 class="serif">All caught up</h2><small style="color:var(--muted)">${deck.length ? rwkvActive() ? (dailyRemaining() === 0 ? 'Daily review limit reached. You’re done for today.' : 'No eligible cards right now. Recall is above target, or recent cards are taking a short break before repeating.') : 'Nothing is due. Come back later, add something new, or get ahead on the cards you’re closest to forgetting.' : 'No cards yet — tap + to add your first.'}</small>${ahead('').length ? '<div><button class="go" id="ahead">Review ahead</button></div>' : ''}</div>`}
     ${rows ? `<div class="label">Focus on a topic</div>${rows}` : ''}
     ${deck.length ? `<div class="links"><button class="topic" id="lib">Manage cards</button><button class="topic" id="stats">Statistics</button><button class="topic" id="map">Knowledge map</button></div>` : ''}
     <button class="fab" aria-label="Add a card">+</button>`;
@@ -225,6 +307,7 @@ function home() {
     try { localStorage.setItem('bloom-open', JSON.stringify([...open])) } catch {}
     home();
   });
+  document.getElementById('scheduler').onclick = openScheduler;
   app.querySelector('.fab').onclick = () => openEditor();
 }
 
@@ -234,6 +317,7 @@ let round = null;
 // closest to forgetting first. FSRS discounts early reviews on its own, so this
 // can't inflate intervals.
 function ahead(topic) {
+  if (rwkvActive()) return [];
   const now = Date.now(), rec = c => { const s = st.reviews[c.id]; return retrievability((now - s.last) / 864e5, s.s) };
   return deck.filter(c => inTopic(c, topic) && st.reviews[c.id]?.due > now).sort((a, b) => rec(a) - rec(b));
 }
@@ -244,6 +328,7 @@ function ahead(topic) {
 // keeps to the schedule and the new-card cap.
 function buildQueue(topic, chosen) {
   const r = ready(topic);
+  if (rwkvActive()) return [...r.due, ...r.fresh].slice(0, Math.min(ROUND, dailyRemaining()));
   const fresh = topic ? deck.filter(c => inTopic(c, topic) && !st.reviews[c.id]) : r.fresh;
   // Interleave new cards among reviews so a round never feels like a wall of unknowns.
   const q = r.due.slice(0, ROUND), f = fresh.slice(0, ROUND - Math.min(q.length, ROUND - Math.min(3, fresh.length)));
@@ -253,7 +338,11 @@ function buildQueue(topic, chosen) {
   return q;
 }
 
-function start(topic, replace, early) {
+async function start(topic, replace, early) {
+  if (rwkvConfig.enabled) {
+    await scoreRWKV();
+    if (view === 'study' || !sheet.hidden) return;
+  }
   const chosen = !!topic || !!early, q = buildQueue(topic, chosen);
   if (!q.length) return toast(topic ? 'No cards in this topic yet' : 'Nothing ready');
   nav({ v: 'study' }, replace);
@@ -263,6 +352,7 @@ function start(topic, replace, early) {
 }
 function next() {
   if (!round.queue.length) return summary();
+  round.shownAt = Date.now();
   round.card = round.queue[0]; round.flipped = false; round.gilded = Math.random() < GILD_CHANCE;
   draw();
 }
@@ -273,11 +363,11 @@ function draw() {
     <div class="bar"><button class="x" aria-label="End round">×</button><div class="progress"><i style="width:${round.pct || 0}%"></i></div><button class="flag ${c.flagged ? 'on' : ''}" aria-label="Flag this card as poorly written" aria-pressed="${!!c.flagged}">⚑</button><div class="xp">${round.shown} xp</div></div>
     <div class="strip"><span>Goal ${Math.min(st.goalDay === day() ? st.goalCount : 0, R$.DAILY_GOAL)}/${R$.DAILY_GOAL}</span><span class="combo ${round.combo >= 3 ? 'on' : ''}">MOMENTUM ×${mult().toFixed(2)}</span>${R$.isHappy(day()) ? '<span class="happy">2× HAPPY HOUR</span>' : ''}<span>Pot <b>${(st.pot || R$.POT_START).toLocaleString()}</b></span></div>
     <div class="card ${round.gilded ? 'gilded' : ''} ${round.flipped ? '' : 'enter'}">
-      <div class="t">${round.gilded ? 'Gilded · ×5 xp' : esc(c.topic)}${!s ? ' · new' : s.due > Date.now() ? ` · ahead, due in ${fmt(s.due - Date.now())}` : ''}</div>
+      <div class="t">${round.gilded ? 'Gilded · ×5 xp' : esc(c.topic)}${!s ? ' · new' : rwkvActive() ? ` · recall ${Math.round((rwkvScores[c.id] ?? 0) * 100)}%` : s.due > Date.now() ? ` · ahead, due in ${fmt(s.due - Date.now())}` : ''}</div>
       <div class="q serif">${md(c.q)}</div>
       ${round.flipped ? `<div class="a serif">${md(c.a)}</div>${c.explanation ? `<div class="ex">${md(c.explanation)}</div>` : ''}` : '<div class="tap">tap to reveal</div>'}
     </div>
-    ${round.flipped ? `<div class="dock"><div class="grades">${['Again', 'Hard', 'Good', 'Easy'].map((n, i) => `<button class="g${i + 1}" data-g="${i + 1}">${n}<small>${fmt(iv[i])}</small></button>`).join('')}</div></div>` : ''}`;
+    ${round.flipped ? `<div class="dock"><div class="grades">${['Again', 'Hard', 'Good', 'Easy'].map((n, i) => `<button class="g${i + 1}" data-g="${i + 1}">${n}${rwkvActive() ? '' : `<small>${fmt(iv[i])}</small>`}</button>`).join('')}</div></div>` : ''}`;
   const pct = 100 * round.done / round.size, bar = app.querySelector('.progress i');
   requestAnimationFrame(() => requestAnimationFrame(() => bar.style.width = pct + '%'));
   countUp(app.querySelector('.xp'), round.shown, round.xp, 450, n => n + ' xp');
@@ -296,8 +386,10 @@ const mult = () => R$.momentum(round.combo);
 function grade(g) {
   if (round.busy) return;
   const c = round.card, wasNew = !st.reviews[c.id];
-  st.reviews[c.id] = review(st.reviews[c.id] || {}, g);
-  st.outbox.push({ id: c.id, grade: g, ts: Date.now(), state: st.reviews[c.id] });
+  const ts = Date.now(), shown = round.shownAt || ts, duration = Math.min(3600000, Math.max(0, ts - shown));
+  st.reviews[c.id] = review(st.reviews[c.id] || {}, g, ts);
+  st.outbox.push({ id: c.id, grade: g, ts, duration, shown, state: st.reviews[c.id] });
+  mergeHistory([[c.id, ts, g, duration, shown]]);
   if (wasNew) { newLeft(); st.newCount++ }
   // Momentum counts reviews in a row, right or wrong: grading honestly never costs you.
   round.combo++;
@@ -315,14 +407,25 @@ function grade(g) {
   float(cr ? `${cr.label} +${gain}` : `+${gain}`, cr ? 'crit x' + cr.x : '');
   round.queue.shift();
   // A missed card comes back once at the end of the round, so you finish on a win.
-  if (g === 1 && !round.again.has(c.id)) { round.again.add(c.id); round.queue.push(c); round.size++ }
+  if (!rwkvActive() && g === 1 && !round.again.has(c.id)) { round.again.add(c.id); round.queue.push(c); round.size++ }
   else if (g > 1) round.right++;
   round.done++;
   save(); sync();
   round.busy = true;
   app.querySelector('.card').classList.add('leave');
   app.querySelector('.dock')?.classList.add('leave');
-  later(() => { round.busy = false; next() }, 170);
+  const current = round;
+  const advance = async () => {
+    if (rwkvActive()) {
+      await scoreRWKV();
+      if (round !== current) return;
+      // Recompute every answer: shared deck/user state can change every score.
+      round.queue = buildQueue(round.topic, false).slice(0, Math.max(0, round.size - round.done));
+    }
+    if (round !== current) return;
+    round.busy = false; next();
+  };
+  later(advance, 170);
 }
 
 let autoplay;
@@ -390,11 +493,11 @@ function summary() {
 /* ---------- Add ---------- */
 /* ---------- Library ---------- */
 let lib = { q: '', topic: '', filter: 'all', sort: 'topic', selecting: false, sel: new Set() }, searchTimer;
-const status = c => { const s = st.reviews[c.id]; return !s ? 'new' : s.due <= Date.now() ? 'ready' : 'in ' + fmt(s.due - Date.now()) };
-const recallOf = c => { const s = st.reviews[c.id]; return s ? retrievability((Date.now() - s.last) / 864e5, s.s) : null };
+const status = c => { const s = st.reviews[c.id]; if (s && rwkvActive()) return ready().due.some(x => x.id === c.id) ? 'ready' : 'recall ' + Math.round((rwkvScores[c.id] ?? 0) * 100) + '%'; return !s ? 'new' : s.due <= Date.now() ? 'ready' : 'in ' + fmt(s.due - Date.now()) };
+const recallOf = c => { if (rwkvActive()) return rwkvScores[c.id] ?? null; const s = st.reviews[c.id]; return s ? retrievability((Date.now() - s.last) / 864e5, s.s) : null };
 const FILTERS = {
   all: ['All', () => true],
-  due: ['Ready', c => st.reviews[c.id]?.due <= Date.now()],
+  due: ['Ready', c => rwkvActive() ? ready().due.some(x => x.id === c.id) : st.reviews[c.id]?.due <= Date.now()],
   new: ['New', c => !st.reviews[c.id]],
   struggling: ['Struggling', c => (st.reviews[c.id]?.lapses || 0) >= 2],
   flagged: ['⚑ Flagged', c => c.flagged],
@@ -534,7 +637,7 @@ function showMap() {
   round = null; view = 'map';
   map({
     app, sheet, goBack, openSheet, inTopic, topics,
-    cards: () => deck, states: () => st.reviews, links: () => st.links,
+    cards: () => deck, states: () => st.reviews, links: () => st.links, recallOf,
     link: (topic, requires) => { addLink(topic, requires); save(); sync() },
     unlink: (topic, requires) => { st.links = st.links.filter(l => !(l.topic === topic && l.requires === requires)); st.ops.push({ kind: 'unlink', topic, requires }); save(); sync() },
     study: topic => { sheet.hidden = true; start(topic) },
@@ -542,7 +645,7 @@ function showMap() {
 }
 function showStats() {
   round = null; view = 'stats';
-  stats({ app, api, goBack, openEditor, inTopic, topics, view: () => view, cards: () => deck, states: () => st.reviews, outbox: () => st.outbox, cardById: id => st.cards[id] });
+  stats({ app, api, goBack, openEditor, inTopic, topics, recallOf, rwkv: rwkvActive(), retention: rwkvActive() ? rwkvConfig.retention : 0.9, view: () => view, cards: () => deck, states: () => st.reviews, outbox: () => st.outbox, cardById: id => st.cards[id] });
 }
 
 function renameTopic(from) {
@@ -710,7 +813,7 @@ function openEditor(card) {
       <textarea name="a" placeholder="Answer" required>${card ? esc(card.a) : ''}</textarea>
       <textarea name="x" class="xbox" placeholder="Explanation (optional) — why it's true, a mnemonic, a common mix-up">${card ? esc(card.explanation || '') : ''}</textarea>
       <button class="btn">${card ? 'Save' : 'Add card'}</button>
-      ${card ? `<small style="color:var(--muted);text-align:center">${status(card) === 'new' ? 'Not studied yet' : `Reviewed ${st.reviews[card.id].reps}× · next ${status(card)}`}</small><button type="button" class="btn ghost" data-flag>${card.flagged ? 'Unflag' : '⚑ Flag for rewrite'}</button><button type="button" class="btn ghost" data-del>Delete card</button>` : ''}
+      ${card ? `<small style="color:var(--muted);text-align:center">${status(card) === 'new' ? 'Not studied yet' : `Reviewed ${st.reviews[card.id].reps}× · ${status(card)}`}</small><button type="button" class="btn ghost" data-flag>${card.flagged ? 'Unflag' : '⚑ Flag for rewrite'}</button><button type="button" class="btn ghost" data-del>Delete card</button>` : ''}
     </form>`;
     const f = sheet.querySelector('form');
     // Keep what's typed when switching topic chips.
@@ -768,9 +871,10 @@ if (Object.values(st.cards).some(c => c.created == null)) st.since = 0;
 merge();
 history.replaceState({ v: 'home', depth: 0 }, '', location.pathname);
 if (!apiKey) gate();
-else { home(); sync().then(ok => { if (ok && !round && sheet.hidden) refresh() }) }
+else { home(); if (st.rwkvHistory) scoreRWKV(); sync().then(ok => { if (ok && !round && sheet.hidden) refresh() }) }
 addEventListener('online', () => apiKey && sync());
 // The map and stats lay out to the screen width, so redraw them when it changes.
+setInterval(() => { if (apiKey && rwkvConfig.enabled && !document.hidden && !round && sheet.hidden) scoreRWKV() }, 30000);
 let resizeTimer;
 addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if ((view === 'map' || view === 'stats') && sheet.hidden) refresh() }, 200) });
 addEventListener('visibilitychange', () => { if (!document.hidden && apiKey) sync().then(() => { if (!round && sheet.hidden) refresh() }) });

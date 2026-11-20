@@ -1,0 +1,2 @@
+# Preserve upstream model metadata byte-for-byte (including CRLF).
+public/models/rwkv-sm98/*.json -text whitespace=cr-at-eol
