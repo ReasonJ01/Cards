@@ -1,3 +1,1 @@
-{ "name": "bloom-cards", "private": true, "type": "module",
-  "scripts": { "dev": "wrangler dev", "deploy": "wrangler deploy", "test": "node --test tests/*.test.js", "db:migrate": "wrangler d1 migrations apply cards --remote" },
-  "devDependencies": { "wrangler": "^4.40.0" } }
+{"name":"bloom-cards","private":true,"type":"module","scripts":{"predev":"node scripts/build-mcp-rules.js","predeploy":"node scripts/build-mcp-rules.js","pretest":"node scripts/build-mcp-rules.js","dev":"wrangler dev","deploy":"wrangler deploy","test":"node --test tests/*.test.js","db:migrate":"wrangler d1 migrations apply cards --remote"},"devDependencies":{"wrangler":"^4.40.0"},"dependencies":{"@modelcontextprotocol/sdk":"^1.32.2","zod":"^4.6.7"}}

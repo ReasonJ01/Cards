@@ -23,3 +23,23 @@ test('D1 migration and API retain review timing and reject invalid ratings', asy
  const incremental=await (await call('/history?after=1')).json();assert.deepEqual(incremental.rows,[['testcard',1000,3,500,900]]);assert.equal(incremental.cursor,2);
  const sync=await (await call('/sync')).json();assert.equal(sync.cards[0].last,2000);assert.equal(sync.cards[0].reps,1);
 });
+
+test('MCP smoke: discovery, rules, validation, add and in-place edit through the API', async () => {
+ let seq=0;
+ const rpc=async(method,params)=>{
+  const r=await worker.fetch(new Request('https://bloom.test/mcp',{method:'POST',headers:{authorization:'Bearer test-only-fixture-key','content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:++seq,method,params})}),{DB});
+  assert.equal(r.status,200);const v=await r.json();assert.equal(v.error,undefined);return v.result;
+ };
+ const invoke=async(name,args)=>{const r=await rpc('tools/call',{name,arguments:args});assert.notEqual(r.isError,true,JSON.stringify(r));return r.structuredContent;};
+ assert.equal((await rpc('initialize',{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'smoke',version:'1'}})).serverInfo.name,'bloom-cards');
+ const tools=await rpc('tools/list',{});assert(tools.tools.some(t=>t.name==='add_cards'));assert(!tools.tools.some(t=>t.name.includes('reset')));
+ assert((await rpc('resources/read',{uri:'bloom://guidelines'})).contents[0].text.includes('Minimum information'));
+ assert.equal((await invoke('list_topics',{})).items[0].topic,'Test');
+ const draft={topic:'Test',q:'MCP smoke question?',a:'One fact',source:'In-memory test fixture'};
+ assert.equal((await invoke('validate_cards',{cards:[{...draft,topic:'Unapproved new topic'}]})).valid,false);
+ const result=await invoke('add_cards',{cards:[draft]});assert.equal(result.added.length,1);const id=result.added[0].id;
+ assert.equal((await invoke('add_cards',{cards:[draft]})).saved,false);
+ await invoke('update_card',{id,changes:{a:'Corrected fact',flagged:false}});
+ const found=await invoke('search_cards',{query:'MCP smoke question'});assert.equal(found.items[0].a,'Corrected fact');assert.equal(found.items[0].id,id);
+ const noConfirm=await rpc('tools/call',{name:'delete_cards',arguments:{ids:[id]}});assert.equal(noConfirm.isError,true);
+});

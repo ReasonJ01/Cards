@@ -1,4 +1,6 @@
 import { checkLink } from '../public/dag.js';
+import { serveMcp } from './mcp.js';
+const MCP_INTERNAL = Symbol('authenticated MCP API call');
 
 // Bloom API. Every /api route except /api/status and /api/claim needs
 // `Authorization: Bearer <key>`. The key is chosen by whoever claims the
@@ -11,9 +13,19 @@ const id = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 const normTopic = t => (t || '').trim().split(/\s*(?:›|>|::|\/)\s*/).filter(Boolean).join(' › ');
 const getMeta = async (db, k) => (await db.prepare('SELECT v FROM meta WHERE k = ?').bind(k).first())?.v;
 
-export default {
+const worker = {
   async fetch(req, env) {
     const url = new URL(req.url), path = url.pathname.replace(/\/+$/, ''), db = env.DB, M = req.method;
+    if (path === '/mcp') {
+      const token = req.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+      const unauthorized = () => new Response(JSON.stringify({error:'unauthorized'}), {status:401, headers:{'content-type':'application/json','www-authenticate':'Bearer realm="Bloom MCP"'}});
+      if (!token) return unauthorized();
+      const origin = req.headers.get('origin');
+      if (origin && origin !== url.origin) return json({error:'origin not allowed'},403);
+      const hash = await sha(token);
+      if (hash !== await getMeta(db,'mcp_key_hash') && hash !== await getMeta(db,'key_hash')) return unauthorized();
+      return serveMcp(req, (apiPath, method='GET', payload) => worker.fetch(new Request(url.origin+'/api'+apiPath, {method,headers:{'content-type':'application/json'},body:payload === undefined ? undefined : JSON.stringify(payload)}), {...env,[MCP_INTERNAL]:true}));
+    }
     if (!path.startsWith('/api')) return env.ASSETS.fetch(req);
     const body = M === 'GET' ? null : await req.json().catch(() => null);
     const keyHash = await getMeta(db, 'key_hash');
@@ -26,7 +38,7 @@ export default {
       return json({ ok: true });
     }
     const auth = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-    if (!keyHash || !auth || await sha(auth) !== keyHash) return json({ error: 'unauthorized' }, 401);
+    if (!env[MCP_INTERNAL] && (!keyHash || !auth || await sha(auth) !== keyHash)) return json({ error: 'unauthorized' }, 401);
 
     // App sync: everything changed since `since` (ms), including deletions.
     if (path === '/api/sync' && M === 'GET') {
@@ -169,3 +181,4 @@ export default {
     return json({ error: 'not found' }, 404);
   },
 };
+export default worker;
