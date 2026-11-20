@@ -46,17 +46,26 @@ export default {
 
     if (path === '/api/reviews' && M === 'POST') {
       const list = Array.isArray(body) ? body : [];
+      if (list.length > 100 || list.some(r => !r || typeof r.id !== 'string' || !Number.isSafeInteger(r.ts) || r.ts <= 0 || ![1, 2, 3, 4].includes(r.grade) || (r.duration != null && (!Number.isSafeInteger(r.duration) || r.duration < 0 || r.duration > 3600000)) || (r.shown != null && (!Number.isSafeInteger(r.shown) || r.shown <= 0 || r.shown > r.ts)))) return json({ error: 'invalid review batch' }, 400);
       const now = Date.now();
-      await db.batch(list.flatMap(r => [
-        db.prepare(`UPDATE cards SET ${STATE.map(k => `${k} = ?`).join(', ')}, updated = ? WHERE id = ?`).bind(...STATE.map(k => r.state?.[k] ?? null), now, r.id),
-        db.prepare('INSERT INTO reviews (card_id, ts, grade) VALUES (?, ?, ?)').bind(r.id, r.ts, r.grade),
+      if (list.length) await db.batch(list.flatMap(r => [
+        db.prepare(`UPDATE cards SET ${STATE.map(k => `${k} = ?`).join(', ')}, updated = ? WHERE id = ? AND deleted = 0 AND (last IS NULL OR last <= ?)`).bind(...STATE.map(k => r.state?.[k] ?? null), now, r.id, r.ts),
+        db.prepare('INSERT INTO reviews (card_id, ts, grade, duration, shown) SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM reviews WHERE card_id = ? AND ts = ? AND grade = ?)').bind(r.id, r.ts, r.grade, r.duration ?? null, r.shown ?? null, r.id, r.ts, r.grade),
       ]));
       return json({ ok: true, count: list.length });
     }
 
-    // Full review log for the stats page, compact: [card_id, ts, grade].
+    // Compact history; original 3 columns retained, optional timing follows.
     if (path === '/api/history' && M === 'GET') {
-      return json(await db.prepare('SELECT card_id, ts, grade FROM reviews ORDER BY ts').raw());
+      if (url.searchParams.has('after')) {
+        const value = Number(url.searchParams.get('after'));
+        const after = Number.isSafeInteger(value) && value >= 0 ? value : 0;
+        const rows = await db.prepare('SELECT id, card_id, ts, grade, duration, shown FROM reviews WHERE id > ? ORDER BY id').bind(after).raw();
+        return json({ rows: rows.map(r => r.slice(1)), cursor: rows.at(-1)?.[0] ?? after });
+      }
+      const value = Number(url.searchParams.get('since'));
+      const since = Number.isSafeInteger(value) && value >= 0 ? value : 0;
+      return json(await db.prepare('SELECT card_id, ts, grade, duration, shown FROM reviews WHERE ts >= ? ORDER BY ts, id').bind(since).raw());
     }
 
     if (path === '/api/topics' && M === 'GET') {

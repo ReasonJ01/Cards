@@ -22,7 +22,7 @@ function build(ctx) {
   for (const t of ctx.topics()) t.split(' › ').forEach((_, i, a) => paths.add(a.slice(0, i + 1).join(' › ')));
   const nodes = [...paths].sort((a, b) => a.localeCompare(b)).map(path => {
     const cs = cards.filter(c => ctx.inTopic(c, path)), studied = cs.filter(c => states[c.id]);
-    const rs = studied.map(c => retrievability((now - states[c.id].last) / DAY, states[c.id].s));
+    const rs = studied.map(c => ctx.recallOf ? ctx.recallOf(c) : retrievability((now - states[c.id].last) / DAY, states[c.id].s));
     return {
       path, depth: path.split(' › ').length - 1, total: cs.length, studied: studied.length,
       mature: studied.filter(c => states[c.id].s >= 21).length,
